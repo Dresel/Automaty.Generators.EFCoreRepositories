@@ -1,6 +1,21 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
+		<Version>1.0.0-alpha1</Version>
+		<PackageId>Automaty.Generators.EFCoreRepositories</PackageId>
+		<Description>An Automaty based generator for Entity Framework Core repositories. Creates strongly typed repositories based on the IModel of your context.</Description>
+		<PackageTags>EntityFrameworkCore EFCore Repositories CodeGeneration Automaty</PackageTags>
+		<PackageProjectUrl>https://github.com/Dresel/Automaty.Generators.EFCoreRepositories</PackageProjectUrl>
+		<PackageLicenseUrl>https://github.com/Dresel/Automaty.Generators.EFCoreRepositories/blob/master/LICENSE.md</PackageLicenseUrl>
+		<RepositoryType>git</RepositoryType>
+		<RepositoryUrl>https://github.com/Dresel/Automaty.Generators.EFCoreRepositories.git</RepositoryUrl>
+		<Authors>Christopher Dresel</Authors>
+		<Company>Christopher Dresel</Company>
+		<PackageOutputPath>..\..\.nuget\packages\Automaty.Generators.EFCoreRepositories</PackageOutputPath>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+	</PropertyGroup>
+
+	<PropertyGroup>
 		<TargetFramework>netstandard1.6</TargetFramework>
 	</PropertyGroup>
 

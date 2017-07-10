@@ -72,7 +72,7 @@
 
 		public bool PluralizeNames { get; set; } = true;
 
-		public string RepositoryClassHeader { get; set; } = "public class {Name}Repository : BaseRepository";
+		public string RepositoryClassHeader { get; set; } = "public partial class {Name}Repository : BaseRepository";
 
 		public string RepositoryConstructorBody { get; set; } = "UnitOfWork = unitOfWork;";
 
