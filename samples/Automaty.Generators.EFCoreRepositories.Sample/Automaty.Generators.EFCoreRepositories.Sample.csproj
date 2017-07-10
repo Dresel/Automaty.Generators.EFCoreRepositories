@@ -6,9 +6,9 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\..\src\Automaty.Generators.EFCoreRepositories\Automaty.Generators.EFCoreRepositories.csproj" />
 		<PackageReference Include="Microsoft.EntityFrameworkCore" Version="1.1.2" />
 		<PackageReference Include="Microsoft.EntityFrameworkCore.SQLite" Version="1.1.2" />
+		<PackageReference Include="Automaty.Generators.EFCoreRepositories" Version="1.0.0-alpha1" />
 		<DotNetCliToolReference Include="Automaty.DotNetCli" Version="1.0.0-alpha6" />
 	</ItemGroup>
 
