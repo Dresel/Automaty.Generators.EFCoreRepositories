@@ -12,7 +12,7 @@ namespace Automaty.Generators.EFCoreRepositories.Test
 		protected const string ProjectFilePath = "Automaty.Generators.EFCoreRepositories.Sample.csproj";
 
 		[TestMethod]
-		public void AutomatyHelloWorldGenerateFiles()
+		public void AutomatyGeneratorsEFCoreRepositoriesGenerateFiles()
 		{
 			string sampleProjectDirectoryPath = SampleTest.ProjectDirectoryPath.ToPlatformSpecificPath();
 			string projectFilePath = SampleTest.ProjectFilePath;
