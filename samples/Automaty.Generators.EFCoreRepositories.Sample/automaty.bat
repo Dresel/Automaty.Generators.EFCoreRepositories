@@ -1,0 +1,1 @@
+dotnet automaty run Repositories\Host.cs --project Automaty.Generators.EFCoreRepositories.Sample.csproj --verbose

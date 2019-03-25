@@ -6,16 +6,23 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.EntityFrameworkCore" Version="2.0.1" />
-		<PackageReference Include="Microsoft.EntityFrameworkCore.SQLite" Version="2.0.1" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore" Version="2.2.3" />
+		<!--<PackageReference Include="Microsoft.EntityFrameworkCore.SQLite" Version="2.2.3" />-->
 		<PackageReference Include="Automaty.Generators.EFCoreRepositories" Version="1.1.0-*" />
-		<DotNetCliToolReference Include="Automaty.DotNetCli" Version="1.0.0-*" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\Automaty.Generators.EFCoreRepositories\Automaty.Generators.EFCoreRepositories.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<Compile Update="Repositories.*.cs">
 			<DependentUpon>Repositories.cs</DependentUpon>
 		</Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+		<DotNetCliToolReference Include="Automaty.DotNetCli" Version="1.0.1-rc1" />
 	</ItemGroup>
 
 </Project>
