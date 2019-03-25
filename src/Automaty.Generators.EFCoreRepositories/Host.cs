@@ -271,22 +271,22 @@
 			return Smart.Format("Context.Set<{ClrType.Name}>()", entityType);
 		}
 
-		public Func<BaseHost<T>, IScriptContext, IEntityType, string> GeneratedFileNameForEntity { get; set; } = (host, context, type) => $"{type.ClrType.Name()}Repository";
+		public Func<BaseHost<T>, IScriptContext, IEntityType, string> GeneratedFileNameForEntity { get; set; } = (host, context, type) => $"{type.ClrType.Name}Repository";
 
 		public Action<BaseHost<T>, IScriptContext, IEntityType> WriteHeader { get; set; } = (host, context, type) => context.Output.Current.WriteLine(host.Header).WriteLine();
 
 		public Func<BaseHost<T>, IScriptContext, IEntityType, IDisposable> WriteNamespace { get; set; } = (host, context, type) => context.Output.Current.WriteScope($"namespace {host.Namespace}");
 
-		public Func<BaseHost<T>, IScriptContext, IEntityType, IDisposable> WriteClassHeader { get; set; } = (host, context, type) => context.Output.Current.WriteScope($"public partial class {type.ClrType.Name()}Repository : BaseRepository, I{type.ClrType.Name()}Repository, I{type.ClrType.Name()}AsyncRepository");
+		public Func<BaseHost<T>, IScriptContext, IEntityType, IDisposable> WriteClassHeader { get; set; } = (host, context, type) => context.Output.Current.WriteScope($"public partial class {type.ClrType.Name}Repository : BaseRepository, I{type.ClrType.Name()}Repository, I{type.ClrType.Name()}AsyncRepository");
 
 		public Action<BaseHost<T>, IScriptContext, IEntityType> WriteConstructor { get; set; } = (host, context, type) =>
 		{
-			using (context.Output.Current.WriteScope($"public {type.ClrType.Name()}Repository(IContext context) : base(context)"))
+			using (context.Output.Current.WriteScope($"public {type.ClrType.Name}Repository(IContext context) : base(context)"))
 			{
 			}
 		};
 
-		public Func<BaseHost<T>, IScriptContext, IEntityType, string> Set { get; set; } = (host, context, type) => $"Context.Set<{type.ClrType.Name()}>()";
+		public Func<BaseHost<T>, IScriptContext, IEntityType, string> Set { get; set; } = (host, context, type) => $"Context.Set<{type.ClrType.Name}>()";
 
 		public Func<BaseHost<T>, IScriptContext, IEntityType, IEnumerable<IProperty>, string> Predicate { get; set; } =
 			(host, context, type, properties) => string.Join(" && ",
