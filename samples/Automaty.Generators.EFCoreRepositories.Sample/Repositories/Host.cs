@@ -8,6 +8,8 @@
 	{
 		public RepositoriesHost()
 		{
+			GenerateAsyncFunctions = true;
+
 			AggregateRepositories["Music"] = new[] { typeof(Album).FullName, typeof(Artist).FullName, typeof(Genre).FullName };
 		}
 	}

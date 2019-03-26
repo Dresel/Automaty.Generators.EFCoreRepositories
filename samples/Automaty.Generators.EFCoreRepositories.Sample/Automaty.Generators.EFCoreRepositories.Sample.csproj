@@ -7,7 +7,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.EntityFrameworkCore" Version="2.2.3" />
-		<!--<PackageReference Include="Microsoft.EntityFrameworkCore.SQLite" Version="2.2.3" />-->
+		<PackageReference Include="Microsoft.EntityFrameworkCore.SQLite" Version="2.2.3" />
 		<PackageReference Include="Automaty.Generators.EFCoreRepositories" Version="1.1.0-*" />
 	</ItemGroup>
 
@@ -16,13 +16,25 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<Compile Update="Repositories.*.cs">
+		<None Remove="automaty.bat" />
+		<!--<Compile Remove="Repositories\Generator\*.cs" />
+		<None Include="Repositories\Generator\*.cs" />-->
+		<Compile Remove="Repositories\Host.cs" />
+		<Compile Remove="Repositories\Interfaces.cs" />
+		<Compile Remove="Repositories\Repositories.cs" />
+		<None Include="Repositories\Host.cs" />
+		<None Include="Repositories\Interfaces.cs" />
+		<None Include="Repositories\Repositories.cs" />
+		<Compile Update="Repositories\*Repository.generated.cs">
 			<DependentUpon>Repositories.cs</DependentUpon>
+		</Compile>
+		<Compile Update="Repositories\I*Repository.generated.cs">
+			<DependentUpon>Interfaces.cs</DependentUpon>
 		</Compile>
 	</ItemGroup>
 
 	<ItemGroup>
-		<DotNetCliToolReference Include="Automaty.DotNetCli" Version="1.0.1-rc1" />
+		<DotNetCliToolReference Include="Automaty.DotNetCli" Version="1.0.1-rc2" />
 	</ItemGroup>
 
 </Project>

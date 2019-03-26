@@ -5,13 +5,10 @@
 	using System.Linq;
 	using System.Threading;
 	using System.Threading.Tasks;
-	using Automaty.Common.Execution;
 	using Automaty.Common.Output;
 	using Humanizer;
 	using Microsoft.EntityFrameworkCore;
 	using Microsoft.EntityFrameworkCore.Metadata;
-	using Microsoft.EntityFrameworkCore.Metadata.Internal;
-	using SmartFormat;
 
 	public class BaseHost<T> where T : DbContext
 	{
@@ -29,271 +26,247 @@
 			Namespace = GetType().Namespace;
 		}
 
+		public IDictionary<string, IEnumerable<string>> AggregateRepositories { get; } =
+			new Dictionary<string, IEnumerable<string>>();
+
 		public ICollection<string> AdditionalNamespaces { get; set; } = new List<string>();
 
-		public IDictionary<string, IEnumerable<string>> AggregateRepositories { get; } = new Dictionary<string, IEnumerable<string>>();
-
-		public string FunctionNameBasicAdd { get; set; } = "Add{0:{ClrType.Name}|}";
-
-		public string FunctionNameBasicGetAll { get; set; } = "GetAllAsync{0:{1:{ClrType.Name}|{ClrType.Name:pluralize()}}|}";
-
-		public string FunctionNameBasicRemove { get; set; } = "Remove{0:{ClrType.Name}|}";
-
-		public string FunctionNameBasicRemoveMultiple { get; set; } = "Remove{0:{1:{ClrType.Name}|{ClrType.Name:pluralize()}}|}";
-
-		public string FunctionNameGetMultipleForPrimaryKeys { get; set; } =
-			"Filter{0:{1:{ClrType.Name}|{ClrType.Name:pluralize()}}|}ByIdsAsync";
-
-		public string FunctionNameGetOneForPrimaryKey { get; set; } = "Get{0:{ClrType.Name}|}ByIdAsync";
-
-		public string FunctionNamePrefixGetMultiple { get; set; } = "Filter{0:{1:{ClrType.Name}|{ClrType.Name:pluralize()}}|}By";
-
-		public string FunctionNamePrefixGetOne { get; set; } = "Get{0:{ClrType.Name}|}By";
-
-		public string FunctionNamePrefixRemoveMultiple { get; set; } = "Remove{0:{1:{ClrType.Name}|{ClrType.Name:pluralize()}}|}By";
-
-		public string FunctionNamePrefixRemoveOne { get; set; } = "Remove{0:{ClrType.Name}|}By";
-
-		public string FunctionNamePrefixTryGetOne { get; set; } = "TryGet{0:{ClrType.Name}|}By";
-
-		public string FunctionNamePrefixTryRemoveOne { get; set; } = "TryRemove{0:{ClrType.Name}|}By";
-
-		public string FunctionNameRemoveMultipleForPrimaryKeys { get; set; } =
-			"Remove{0:{1:{ClrType.Name}|{ClrType.Name:pluralize()}}|}ByIdsAsync";
-
-		public string FunctionNameRemoveOneForPrimaryKey { get; set; } = "Remove{0:{ClrType.Name}|}ByIdAsync";
-
-		public string FunctionNameTryGetOneForPrimaryKey { get; set; } = "TryGet{0:{ClrType.Name}|}ByIdAsync";
-
-		public string FunctionNameTryRemoveOneForPrimaryKey { get; set; } = "TryRemove{0:{ClrType.Name}|}ByIdAsync";
+		public bool GenerateAsyncFunctions { get; set; }
 
 		public string Header { get; set; }
 
 		public string Namespace { get; set; }
-
-		public bool PluralizeNames { get; set; } = true;
-
-		//public string RepositoryClassHeader { get; set; } = "public partial class {Name}Repository : BaseRepository, I{Name}Repository";
-
-		public string RepositoryConstructorBody { get; set; } = string.Empty;
-
-		//public string RepositoryConstructorHeader { get; set; } = "public {Name}Repository(IContext context) : base(context)";
-
-		public string RepositoryInterfaceHeader { get; set; } = "public interface I{Name}Repository";
-
-		public string ToCollectionFunctionCall { get; set; } = "ToListAsync(cancellationToken)";
 
 		public virtual void Execute(IScriptContext scriptContext)
 		{
 			scriptContext.Output.Settings.IndentString = "\t";
 			scriptContext.Output.CurrentGeneratedFileName.AddScriptFileNameAsPrefix = false;
 
-			////Smart.Default.AddExtensions(new FirstCharacterToLowerFormatter());
-			////Smart.Default.AddExtensions(new PluralizeFormatter());
-			////Smart.Default.AddExtensions(new FirstCharacterToLowerAndPluralizeFormatter());
-
-			DbContextOptions options = new DbContextOptionsBuilder(new DbContextOptions<T>()).UseInMemoryDatabase(Guid.NewGuid().ToString())
-				.Options;
+			DbContextOptions options = new DbContextOptionsBuilder(new DbContextOptions<T>())
+				.UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
 
 			using (T context = (T)Activator.CreateInstance(typeof(T), options))
 			{
 				IModel model = context.Model;
 
-				//foreach (KeyValuePair<string, IEnumerable<string>> keyValuePair in AggregateRepositories)
-				//{
-				//	ProcessEntityCollection(context, keyValuePair.Value.Select(x => model.FindEntityType(x)), keyValuePair.Key);
-				//	ProcessEntityCollectionInterfaces(context, keyValuePair.Value.Select(x => model.FindEntityType(x)),
-				//		keyValuePair.Key);
-				//}
+				foreach (KeyValuePair<string, IEnumerable<string>> keyValuePair in AggregateRepositories)
+				{
+					ProcessEntityCollection(scriptContext,
+						keyValuePair.Value.Select(x => model.FindEntityType(x)).ToList(), keyValuePair.Key);
+
+					ProcessEntityCollectionInterface(scriptContext,
+						keyValuePair.Value.Select(x => model.FindEntityType(x)).ToList(), keyValuePair.Key);
+				}
 
 				foreach (IEntityType entityType in model.GetEntityTypes().Where(x => !x.ClrType.IsGenericType))
 				{
 					ProcessEntity(scriptContext, entityType);
-					//ProcessEntityInterface(context, type);
+					ProcessEntityInterface(scriptContext, entityType);
 				}
 			}
 		}
 
-		public virtual string GetEntityType(IEntityType entityType)
+		public virtual void ProcessEntity(IScriptContext context, IEntityType type)
 		{
-			return Smart.Format("{ClrType.Name}", entityType);
-		}
+			context.Logger.WriteDebug($"Processing entity '{type.Name}'.");
 
-		public virtual string GetEntityTypeCollection(IEntityType entityType)
-		{
-			return Smart.Format("ICollection<{ClrType.Name}>", entityType);
-		}
+			context.Output.CurrentGeneratedFileName.FileNameWithoutExtension = FileNameForEntity(type);
 
-		public virtual string GetFunctionBodyBasicAdd(IEntityType entityType)
-		{
-			return $"{GetSetAccessor(entityType)}.Add(entity);";
-		}
+			WriteHeader(context);
 
-		public virtual string GetFunctionBodyBasicGetAll(IEntityType entityType)
-		{
-			return $"return await {GetSetAccessor(entityType)}.{ToCollectionFunctionCall};";
-		}
-
-		public virtual string GetFunctionBodyBasicRemove(IEntityType entityType)
-		{
-			return $"{GetSetAccessor(entityType)}.Remove(entity);";
-		}
-
-		public virtual string GetFunctionBodyBasicRemoveMultiple(IEntityType entityType)
-		{
-			return $"{GetSetAccessor(entityType)}.RemoveRange(entities);";
-		}
-
-		public virtual string GetFunctionBodyRemoveSingle(IEntityType entityType, IEnumerable<IProperty> properties)
-		{
-			return
-				$"{GetEntityType(entityType)} entity = await {GetSetAccessor(entityType)}.SingleAsync({GetPredicate(properties)}, cancellationToken);" +
-				Environment.NewLine + Environment.NewLine + $"{GetSetAccessor(entityType)}.Remove(entity);";
-		}
-
-		public virtual string GetFunctionBodyRemoveWhere(IEntityType entityType, IEnumerable<IProperty> properties)
-		{
-			return
-				$"IEnumerable<{GetEntityType(entityType)}> entities = await {GetSetAccessor(entityType)}.Where({GetPredicate(properties)}).{ToCollectionFunctionCall};" +
-				Environment.NewLine + Environment.NewLine + $"{GetSetAccessor(entityType)}.RemoveRange(entities);";
-		}
-
-		public virtual string GetFunctionBodyRemoveWhereEnumerable(IEntityType entityType, IEnumerable<IProperty> properties)
-		{
-			return
-				$"IEnumerable<{GetEntityType(entityType)}> entities = await {GetSetAccessor(entityType)}.Where({GetPredicateContains(properties)}).{ToCollectionFunctionCall};" +
-				Environment.NewLine + Environment.NewLine + $"{GetSetAccessor(entityType)}.RemoveRange(entities);";
-		}
-
-		public virtual string GetFunctionBodyReturnSingle(IEntityType entityType, IEnumerable<IProperty> properties)
-		{
-			return $"return await {GetSetAccessor(entityType)}.SingleAsync({GetPredicate(properties)}, cancellationToken);";
-		}
-
-		public virtual string GetFunctionBodyReturnSingleOrDefault(IEntityType entityType, IEnumerable<IProperty> properties)
-		{
-			return $"return await {GetSetAccessor(entityType)}.SingleOrDefaultAsync({GetPredicate(properties)}, cancellationToken);";
-		}
-
-		public virtual string GetFunctionBodyReturnWhere(IEntityType entityType, IEnumerable<IProperty> properties)
-		{
-			return $"return await {GetSetAccessor(entityType)}.Where({GetPredicate(properties)}).{ToCollectionFunctionCall};";
-		}
-
-		public virtual string GetFunctionBodyReturnWhereEnumerable(IEntityType entityType, IEnumerable<IProperty> properties)
-		{
-			return $"return await {GetSetAccessor(entityType)}.Where({GetPredicateContains(properties)}).{ToCollectionFunctionCall};";
-		}
-
-		public virtual string GetFunctionBodyTryRemoveSingle(IEntityType entityType, IEnumerable<IProperty> properties)
-		{
-			return
-				$"{GetEntityType(entityType)} entity = await {GetSetAccessor(entityType)}.SingleOrDefaultAsync({GetPredicate(properties)}, cancellationToken);" +
-				Environment.NewLine + Environment.NewLine + "if (entity == null) return false;" + Environment.NewLine +
-				Environment.NewLine + $"{GetSetAccessor(entityType)}.Remove(entity);" + Environment.NewLine + "return true;";
-		}
-
-		public virtual string GetFunctionHeader(string returnType, string name, string parameters)
-		{
-			return $"public virtual {returnType} {name}({parameters})";
-		}
-
-		public virtual string GetFunctionHeaderAsync(string returnType, string name, string parameters)
-		{
-			return
-				$"public virtual async Task{(returnType != "void" ? $"<{returnType}>" : string.Empty)} {name}({parameters}{(!string.IsNullOrEmpty(parameters) ? ", " : string.Empty)}CancellationToken cancellationToken)";
-		}
-
-		public virtual string GetFunctionNameParameter(IEnumerable<IProperty> properties, bool pluralize = false)
-		{
-			return string.Join("And", properties.Select(x => pluralize ? x.Name.Pluralize() : x.Name));
-
-			// return Smart.Format(!pluralize ? "{0:{Name}|And}" : "{0:{Name:pluralize()}|And}", properties);
-		}
-
-		public virtual string GetFunctionSignature(string returnType, string name, string parameters)
-		{
-			return $"{returnType} {name}({parameters});";
-		}
-
-		public virtual string GetFunctionSignatureAsync(string returnType, string name, string parameters)
-		{
-			return
-				$"Task{(returnType != "void" ? $"<{returnType}>" : string.Empty)} {name}({parameters}{(!string.IsNullOrEmpty(parameters) ? ", " : string.Empty)}CancellationToken cancellationToken);";
-		}
-
-		public virtual string GetParameterList(IEnumerable<IProperty> properties)
-		{
-			return Smart.Format("{0:{ClrType.Namespace}.{ClrType.Name} {Name:fctl()}|, }", properties);
-		}
-
-		public virtual string GetParameterListEnumerable(IEnumerable<IProperty> properties)
-		{
-			IEnumerable<IProperty> enumerable = properties as IList<IProperty> ?? properties.ToList();
-
-			if (enumerable.Count() == 1)
+			using (WriteNamespace(context))
 			{
-				return Smart.Format($"IEnumerable<{{0.ClrType.Namespace}}.{{0.ClrType.Name}}> {GetParameterNameEnumerable(enumerable)}",
-					enumerable.Single());
+				WriteUsings(context, new[] { type });
+
+				using (WriteClassHeader(context, type.ClrType.Name))
+				{
+					WriteConstructor(context, type.ClrType.Name);
+					WriteBasicFunctions(context, type, false);
+
+					ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
+
+					IKey key = type.FindPrimaryKey();
+
+					WriteFunctions(context, type, key.Properties, false, false, true, GenerateAsyncFunctions);
+					addedFunctions.Add(key.Properties);
+
+					foreach (IIndex index in type.GetIndexes())
+					{
+						if (!addedFunctions.Contains(index.Properties))
+						{
+							WriteFunctions(context, type, index.Properties, true, true, index.IsUnique,
+								GenerateAsyncFunctions);
+							addedFunctions.Add(index.Properties);
+						}
+					}
+
+					foreach (IForeignKey foreignKey in type.GetForeignKeys())
+					{
+						if (!addedFunctions.Contains(foreignKey.Properties))
+						{
+							WriteFunctions(context, type, foreignKey.Properties, true, true, foreignKey.IsUnique,
+								GenerateAsyncFunctions);
+							addedFunctions.Add(foreignKey.Properties);
+						}
+					}
+				}
 			}
-
-			return Smart.Format(
-				$"IEnumerable<Tuple<{{0:{{ClrType.Namespace}}.{{ClrType.Name}}|, }}>> {GetParameterNameEnumerable(enumerable)}",
-				properties);
 		}
 
-		public virtual string GetParameterNameEnumerable(IEnumerable<IProperty> properties)
+		public virtual void ProcessEntityCollection(IScriptContext context, ICollection<IEntityType> types,
+			string collectionName)
 		{
-			return GetFunctionNameParameter(properties, PluralizeNames).FirstCharacterToLower();
-		}
+			context.Logger.WriteDebug($"Processing collection '{collectionName}'.");
 
-		public virtual string GetPredicate(IEnumerable<IProperty> properties)
-		{
-			return Smart.Format("x => {0:x.{Name} == {Name:fctl()}| && }", properties);
-		}
+			context.Output.CurrentGeneratedFileName.FileNameWithoutExtension = FileNameForCollection(collectionName);
 
-		public virtual string GetPredicateContains(IEnumerable<IProperty> properties)
-		{
-			IEnumerable<IProperty> enumerable = properties as IList<IProperty> ?? properties.ToList();
+			WriteHeader(context);
 
-			if (enumerable.Count() == 1)
+			using (WriteNamespace(context))
 			{
-				return Smart.Format("x => {Name:fctlap()}.Contains(x.{Name})", enumerable.Single());
+				WriteUsings(context, types);
+
+				using (WriteClassHeader(context, collectionName))
+				{
+					WriteConstructor(context, collectionName);
+
+					ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
+
+					foreach (IEntityType type in types)
+					{
+						WriteBasicFunctions(context, type, true);
+						IKey key = type.FindPrimaryKey();
+
+						WriteFunctions(context, type, key.Properties, true, false, true, GenerateAsyncFunctions);
+						addedFunctions.Add(key.Properties);
+
+						foreach (IIndex index in type.GetIndexes())
+						{
+							if (!addedFunctions.Contains(index.Properties))
+							{
+								WriteFunctions(context, type, index.Properties, true, true, index.IsUnique,
+									GenerateAsyncFunctions);
+								addedFunctions.Add(index.Properties);
+							}
+						}
+
+						foreach (IForeignKey foreignKey in type.GetForeignKeys())
+						{
+							if (!addedFunctions.Contains(foreignKey.Properties))
+							{
+								WriteFunctions(context, type, foreignKey.Properties, true, true, foreignKey.IsUnique,
+									GenerateAsyncFunctions);
+								addedFunctions.Add(foreignKey.Properties);
+							}
+						}
+					}
+				}
 			}
-
-			return Smart.Format(
-				$"x => {GetParameterNameEnumerable(enumerable)}.Contains(new Tuple<{{0:{{ClrType.Namespace}}.{{ClrType.Name}}|, }}>({{0:x.{{Name}}|, }}))",
-				properties);
 		}
 
-		public virtual string GetSetAccessor(IEntityType entityType)
+		public virtual void ProcessEntityCollectionInterface(IScriptContext context, ICollection<IEntityType> types,
+			string collectionName)
 		{
-			return Smart.Format("Context.Set<{ClrType.Name}>()", entityType);
-		}
+			context.Logger.WriteDebug($"Processing collection '{collectionName}' (interface).");
 
-		public Func<BaseHost<T>, IScriptContext, IEntityType, string> GeneratedFileNameForEntity { get; set; } = (host, context, type) => $"{type.ClrType.Name}Repository";
+			context.Output.CurrentGeneratedFileName.FileNameWithoutExtension =
+				$"I{FileNameForCollection(collectionName)}";
 
-		public Action<BaseHost<T>, IScriptContext, IEntityType> WriteHeader { get; set; } = (host, context, type) => context.Output.Current.WriteLine(host.Header).WriteLine();
+			WriteHeader(context);
 
-		public Func<BaseHost<T>, IScriptContext, IEntityType, IDisposable> WriteNamespace { get; set; } = (host, context, type) => context.Output.Current.WriteScope($"namespace {host.Namespace}");
-
-		public Func<BaseHost<T>, IScriptContext, IEntityType, IDisposable> WriteClassHeader { get; set; } = (host, context, type) => context.Output.Current.WriteScope($"public partial class {type.ClrType.Name}Repository : BaseRepository, I{type.ClrType.Name()}Repository, I{type.ClrType.Name()}AsyncRepository");
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType> WriteConstructor { get; set; } = (host, context, type) =>
-		{
-			using (context.Output.Current.WriteScope($"public {type.ClrType.Name}Repository(IContext context) : base(context)"))
+			using (WriteNamespace(context))
 			{
+				WriteUsings(context, types);
+
+				using (WriteInterfaceHeader(context, collectionName))
+				{
+					ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
+
+					foreach (IEntityType type in types)
+					{
+						WriteBasicFunctionSignatures(context, type, true);
+						IKey key = type.FindPrimaryKey();
+
+						WriteFunctionSignatures(context, type, key.Properties, true, false, true,
+							GenerateAsyncFunctions);
+						addedFunctions.Add(key.Properties);
+
+						foreach (IIndex index in type.GetIndexes())
+						{
+							if (!addedFunctions.Contains(index.Properties))
+							{
+								WriteFunctionSignatures(context, type, index.Properties, true, true, index.IsUnique,
+									GenerateAsyncFunctions);
+								addedFunctions.Add(index.Properties);
+							}
+						}
+
+						foreach (IForeignKey foreignKey in type.GetForeignKeys())
+						{
+							if (!addedFunctions.Contains(foreignKey.Properties))
+							{
+								WriteFunctionSignatures(context, type, foreignKey.Properties, true, true,
+									foreignKey.IsUnique, GenerateAsyncFunctions);
+								addedFunctions.Add(foreignKey.Properties);
+							}
+						}
+					}
+				}
 			}
-		};
+		}
 
-		public Func<BaseHost<T>, IScriptContext, IEntityType, string> Set { get; set; } = (host, context, type) => $"Context.Set<{type.ClrType.Name}>()";
+		public virtual void ProcessEntityInterface(IScriptContext context, IEntityType type)
+		{
+			context.Logger.WriteDebug($"Processing entity '{type.Name}' (interface).");
 
-		public Func<BaseHost<T>, IScriptContext, IEntityType, IEnumerable<IProperty>, string> Predicate { get; set; } =
-			(host, context, type, properties) => string.Join(" && ",
-				properties.Select(x =>
-					$"{(!x.IsShadowProperty ? $"x.{x.Name}" : $"EF.Property<{x.ClrType.Name()}>(x, \"{x.Name}\")")} == {x.Name.FirstCharacterToLower()}"));
+			context.Output.CurrentGeneratedFileName.FileNameWithoutExtension = $"I{FileNameForEntity(type)}";
 
-		static Type GetTupleType(Type[] types)
+			WriteHeader(context);
+
+			using (WriteNamespace(context))
+			{
+				WriteUsings(context, new[] { type });
+
+				using (WriteInterfaceHeader(context, type.ClrType.Name))
+				{
+					WriteBasicFunctionSignatures(context, type, false);
+
+					ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
+
+					IKey key = type.FindPrimaryKey();
+
+					WriteFunctionSignatures(context, type, key.Properties, false, false, true, GenerateAsyncFunctions);
+					addedFunctions.Add(key.Properties);
+
+					foreach (IIndex index in type.GetIndexes())
+					{
+						if (!addedFunctions.Contains(index.Properties))
+						{
+							WriteFunctionSignatures(context, type, index.Properties, true, true, index.IsUnique,
+								GenerateAsyncFunctions);
+							addedFunctions.Add(index.Properties);
+						}
+					}
+
+					foreach (IForeignKey foreignKey in type.GetForeignKeys())
+					{
+						if (!addedFunctions.Contains(foreignKey.Properties))
+						{
+							WriteFunctionSignatures(context, type, foreignKey.Properties, true, true,
+								foreignKey.IsUnique, GenerateAsyncFunctions);
+							addedFunctions.Add(foreignKey.Properties);
+						}
+					}
+				}
+			}
+		}
+
+		protected virtual string Entity(bool addEntityName, IEntityType type, bool pluralize = false)
+		{
+			return addEntityName ? (!pluralize ? type.ClrType.Name : type.ClrType.Name.Pluralize()) : string.Empty;
+		}
+
+		protected virtual Type GetTupleType(Type[] types)
 		{
 			switch (types.Length)
 			{
@@ -310,1074 +283,766 @@
 			}
 		}
 
-		public Func<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, string> PredicateContains { get; set; } =
-			(host, context, type, properties) =>
+		protected virtual string FileNameForCollection(string collectionName) => $"{collectionName}Repository";
+
+		protected virtual string FileNameForEntity(IEntityType type) => $"{type.ClrType.Name}Repository";
+
+		protected virtual Type ListType(IEntityType type, bool asTask = false)
+		{
+			Type listType = typeof(IList<>).MakeGenericType(type.ClrType);
+			return !asTask ? listType : typeof(Task<>).MakeGenericType(listType);
+		}
+
+		protected virtual string Predicate(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addCompleteKey)
+		{
+			if (properties.Count == 1 && !addCompleteKey)
 			{
-				if (properties.Count == 1)
-				{
-					IProperty property = properties.Single();
-
-					return $"{property.Name.Pluralize().FirstCharacterToLower()}.Contains({(!property.IsShadowProperty ? $"x.{property.Name}" : $"EF.Property<{property.ClrType.Name()}>(x, \"{property.Name}\")")})";
-				}
-
 				return
-					$"{string.Join("And", properties.Select(x => x.Name.Pluralize())).FirstCharacterToLower()}.Contains(new {GetTupleType(properties.Select(x => x.ClrType).ToArray()).Name()}({(string.Join(", ", properties.Select(x => $"{(!x.IsShadowProperty ? $"x.{x.Name}" : $"EF.Property<{x.ClrType.Name()}>(x, \"{x.Name}\")")}")))}))";
+					$"{(!properties.Single().IsShadowProperty ? $"x.{properties.Single().Name}" : $"EF.Property<{properties.Single().ClrType.Name()}>(x, \"{properties.Single().Name}\")")} == id";
+			}
 
-				//return string.Join(" && ",
-				//	key.Properties.Select(x =>
-				//		$"{(!x.IsShadowProperty ? $"x.{x.Name}" : $"EF.Property<{x.ClrType.Name()}>(x, \"{x.Name}\")")} == {x.Name.FirstCharacterToLower()}"));
-			};
+			return string.Join(" && ",
+				properties.Select(x =>
+					$"{(!x.IsShadowProperty ? $"x.{x.Name}" : $"EF.Property<{x.ClrType.Name()}>(x, \"{x.Name}\")")} == {x.Name.FirstCharacterToLower()}"));
+		}
 
-		//
-
-		public Func<BaseHost<T>, IScriptContext, Type, string, ICollection<KeyValuePair<string, Type>>, IDisposable>
-			WriteFunctionHeader { get; set; } = (host, context, returnType, name, parameters) =>
+		protected virtual string PredicateContains(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addCompleteKey)
 		{
-			return context.Output.Current.WriteLine().WriteScope(
-				$"public virtual {returnType?.Name() ?? "void"} {name}({string.Join(", ", parameters.Select(x => $"{x.Value.Name()} {x.Key}"))})");
-		};
+			if (properties.Count == 1)
+			{
+				IProperty property = properties.Single();
 
+				return !addCompleteKey
+					? $"ids.Contains({(!property.IsShadowProperty ? $"x.{property.Name}" : $"EF.Property<{property.ClrType.Name()}>(x, \"{property.Name}\")")})"
+					: $"{property.Name.Pluralize().FirstCharacterToLower()}.Contains({(!property.IsShadowProperty ? $"x.{property.Name}" : $"EF.Property<{property.ClrType.Name()}>(x, \"{property.Name}\")")})";
+			}
 
-		public Action<BaseHost<T>, IScriptContext, IEntityType> WriteUsings { get; set; } = (host, context, type) =>
+			return !addCompleteKey
+				? $"ids.Contains(new {GetTupleType(properties.Select(x => x.ClrType).ToArray()).Name()}({(string.Join(", ", properties.Select(x => $"{(!x.IsShadowProperty ? $"x.{x.Name}" : $"EF.Property<{x.ClrType.Name()}>(x, \"{x.Name}\")")}")))}))"
+				: $"{Properties(properties, true, true).FirstCharacterToLower()}.Contains(new {GetTupleType(properties.Select(x => x.ClrType).ToArray()).Name()}({(string.Join(", ", properties.Select(x => $"{(!x.IsShadowProperty ? $"x.{x.Name}" : $"EF.Property<{x.ClrType.Name()}>(x, \"{x.Name}\")")}")))}))";
+		}
+
+		protected virtual string Properties(IReadOnlyCollection<IProperty> properties, bool addCompleteKey,
+			bool pluralize = false)
 		{
-			context.Output.Current.WriteLine("using System;")
-				.WriteLine("using System.Linq;")
-				.WriteLine("using System.Collections.Generic;")
-				.WriteLine("using System.Threading;")
-				.WriteLine("using System.Threading.Tasks;")
-				.WriteLine("using Microsoft.EntityFrameworkCore;")
-				.WriteLine($"using {type.ClrType.Namespace};");
+			if (!pluralize)
+			{
+				return (addCompleteKey ? string.Join("And", properties.Select(x => x.Name)) : "Id");
+			}
 
-			foreach (string @namespace in host.AdditionalNamespaces)
+			return (addCompleteKey ? string.Join("And", properties.Select(x => x.Name.Pluralize())) : "Ids");
+		}
+
+		protected virtual string Set(IScriptContext context, IEntityType type)
+		{
+			return $"Context.Set<{type.ClrType.Name}>()";
+		}
+
+		protected virtual Dictionary<string, Type> ToDictionary(IReadOnlyCollection<IProperty> properties,
+			bool addCompleteKey)
+		{
+			if (properties.Count == 1 && !addCompleteKey)
+			{
+				return new Dictionary<string, Type>()
+				{
+					{ "id", properties.Single().ClrType }
+				};
+			}
+
+			return properties.ToDictionary(x => x.Name.FirstCharacterToLower(), y => y.ClrType);
+		}
+
+		protected virtual KeyValuePair<string, Type> ToEnumerableKeyValuePair(IReadOnlyCollection<IProperty> properties,
+			bool addCompleteKey)
+		{
+			Type type = properties.Count == 1
+				? typeof(IEnumerable<>).MakeGenericType(properties.Single().ClrType)
+				: typeof(IEnumerable<>).MakeGenericType(GetTupleType(properties.Select(x => x.ClrType).ToArray()));
+
+			return new KeyValuePair<string, Type>(Properties(properties, addCompleteKey, true).FirstCharacterToLower(),
+				type);
+		}
+
+		protected virtual void WriteAddAsyncFunction(IScriptContext context, IEntityType type, bool addEntityName)
+		{
+			using (WriteFunctionHeader(context, typeof(Task), $"Add{Entity(addEntityName, type)}Async",
+				new Dictionary<string, Type>()
+				{
+					{ "entity", type.ClrType },
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine($"return {Set(context, type)}.AddAsync(entity, cancellationToken);");
+			}
+		}
+
+		protected virtual void
+			WriteAddAsyncFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+			WriteFunctionSignature(context, typeof(Task), $"Add{Entity(addEntityName, type)}Async",
+				new Dictionary<string, Type>()
+				{
+					{ "entity", type.ClrType },
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteAddFunction(IScriptContext context, IEntityType type, bool addEntityName)
+		{
+			using (WriteFunctionHeader(context, null, $"Add{Entity(addEntityName, type)}",
+				new Dictionary<string, Type>()
+				{
+					{ "entity", type.ClrType }
+				}))
+			{
+				context.Output.Current.WriteLine($"{Set(context, type)}.Add(entity);");
+			}
+		}
+
+		protected virtual void
+			WriteAddFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+			WriteFunctionSignature(context, null, $"Add{Entity(addEntityName, type)}", new Dictionary<string, Type>()
+			{
+				{ "entity", type.ClrType }
+			});
+
+		protected virtual void WriteBasicFunctions(IScriptContext context, IEntityType type, bool addEntityName)
+		{
+			WriteAddFunction(context, type, addEntityName);
+			WriteAddAsyncFunction(context, type, addEntityName);
+			WriteRemoveFunction(context, type, addEntityName);
+			WriteRemoveRangeFunction(context, type, addEntityName);
+			WriteGetAllFunction(context, type, addEntityName);
+			WriteGetAllAsyncFunction(context, type, addEntityName);
+		}
+
+		protected virtual void WriteBasicFunctionSignatures(IScriptContext context, IEntityType type,
+			bool addEntityName)
+		{
+			WriteAddFunctionSignature(context, type, addEntityName);
+			WriteAddAsyncFunctionSignature(context, type, addEntityName);
+			WriteRemoveFunctionSignature(context, type, addEntityName);
+			WriteRemoveRangeFunctionSignature(context, type, addEntityName);
+			WriteGetAllFunctionSignature(context, type, addEntityName);
+			WriteGetAllAsyncFunctionSignature(context, type, addEntityName);
+		}
+
+		protected virtual IDisposable WriteClassHeader(IScriptContext context, string name) =>
+			context.Output.Current.WriteScope(
+				$"public partial class {name}Repository : BaseRepository, I{name}Repository");
+
+		protected virtual void WriteConstructor(IScriptContext context, string name)
+		{
+			using (context.Output.Current.WriteScope($"public {name}Repository(IContext context) : base(context)"))
+			{
+			}
+		}
+
+		protected virtual IDisposable WriteFunctionHeader(IScriptContext context, Type returnType, string name,
+			ICollection<KeyValuePair<string, Type>> parameters)
+		{
+			return context.Output.Current.WriteLine()
+				.WriteScope(
+					$"public virtual {returnType?.Name() ?? "void"} {name}({string.Join(", ", parameters.Select(x => $"{x.Value.Name()} {x.Key}"))})");
+		}
+
+		protected virtual void WriteFunctions(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey, bool unique, bool async)
+		{
+			if (unique)
+			{
+				WriteGetByKeyFunction(context, type, properties, addEntityName, addCompleteKey);
+				WriteTryGetByKeyFunction(context, type, properties, addEntityName, addCompleteKey);
+				WriteGetByKeysFunction(context, type, properties, addEntityName, addCompleteKey);
+
+				WriteRemoveByKeyFunction(context, type, properties, addEntityName, addCompleteKey);
+				WriteTryRemoveByKeyFunction(context, type, properties, addEntityName, addCompleteKey);
+				WriteRemoveByKeysFunction(context, type, properties, addEntityName, addCompleteKey);
+
+				if (async)
+				{
+					WriteGetByKeyAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+					WriteTryGetByKeyAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+					WriteGetByKeysAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+
+					WriteRemoveByKeyAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+					WriteTryRemoveByKeyAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+					WriteRemoveByKeysAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+				}
+			}
+			else
+			{
+				WriteGetMultipleByKeyFunction(context, type, properties, addEntityName, addCompleteKey);
+				WriteGetByKeysFunction(context, type, properties, addEntityName, addCompleteKey);
+
+				WriteRemoveMultipleByKeyFunction(context, type, properties, addEntityName, addCompleteKey);
+				WriteRemoveByKeysFunction(context, type, properties, addEntityName, addCompleteKey);
+
+				if (async)
+				{
+					WriteGetMultipleByKeyAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+					WriteGetByKeysAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+
+					WriteRemoveMultipleByKeyAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+					WriteRemoveByKeysAsyncFunction(context, type, properties, addEntityName, addCompleteKey);
+				}
+			}
+		}
+
+		protected virtual IDisposable WriteFunctionSignature(IScriptContext context, Type returnType, string name,
+			ICollection<KeyValuePair<string, Type>> parameters)
+		{
+			return context.Output.Current.WriteLine(
+				$"{returnType?.Name() ?? "void"} {name}({string.Join(", ", parameters.Select(x => $"{x.Value.Name()} {x.Key}"))});");
+		}
+
+		protected virtual void WriteFunctionSignatures(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey, bool unique, bool async)
+		{
+			if (unique)
+			{
+				WriteGetByKeyFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+				WriteTryGetByKeyFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+				WriteGetByKeysFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+
+				WriteRemoveByKeyFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+				WriteTryRemoveByKeyFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+				WriteRemoveByKeysFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+
+				if (async)
+				{
+					WriteGetByKeyAsyncFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+					WriteTryGetByKeyAsyncFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+					WriteGetByKeysAsyncFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+
+					WriteRemoveByKeyAsyncFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+					WriteTryRemoveByKeyAsyncFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+					WriteRemoveByKeysAsyncFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+				}
+			}
+			else
+			{
+				WriteGetMultipleByKeyFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+				WriteGetByKeysFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+
+				WriteRemoveMultipleByKeyFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+				WriteRemoveByKeysFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+
+				if (async)
+				{
+					WriteGetMultipleByKeyAsyncFunctionSignature(context, type, properties, addEntityName,
+						addCompleteKey);
+					WriteGetByKeysAsyncFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+
+					WriteRemoveMultipleByKeyAsyncFunctionSignature(context, type, properties, addEntityName,
+						addCompleteKey);
+					WriteRemoveByKeysAsyncFunctionSignature(context, type, properties, addEntityName, addCompleteKey);
+				}
+			}
+		}
+
+		protected virtual void WriteGetAllAsyncFunction(IScriptContext context, IEntityType type, bool addEntityName)
+		{
+			using (WriteFunctionHeader(context, ListType(type, true), $"GetAll{Entity(addEntityName, type, true)}Async",
+				new Dictionary<string, Type>()
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.ToListAsync(cancellationToken).ContinueWith<{ListType(type).Name()}>(t => t.Result, TaskContinuationOptions.ExecuteSynchronously);");
+			}
+		}
+
+		protected virtual void
+			WriteGetAllAsyncFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+			WriteFunctionSignature(context, ListType(type, true), $"GetAll{Entity(addEntityName, type, true)}Async",
+				new Dictionary<string, Type>()
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteGetAllFunction(IScriptContext context, IEntityType type, bool addEntityName)
+		{
+			using (WriteFunctionHeader(context, ListType(type), $"GetAll{Entity(addEntityName, type, true)}",
+				new Dictionary<string, Type>()))
+			{
+				context.Output.Current.WriteLine($"return {Set(context, type)}.ToList();");
+			}
+		}
+
+		protected virtual void
+			WriteGetAllFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+			WriteFunctionSignature(context, ListType(type), $"GetAll{Entity(addEntityName, type, true)}",
+				new Dictionary<string, Type>());
+
+		protected virtual void WriteGetByKeyAsyncFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, typeof(Task<>).MakeGenericType(type.ClrType),
+				$"Get{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.SingleAsync(x => {Predicate(context, type, properties, addCompleteKey)}, cancellationToken);");
+			}
+		}
+
+		protected virtual void WriteGetByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, typeof(Task<>).MakeGenericType(type.ClrType),
+				$"Get{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteGetByKeyFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, type.ClrType,
+				$"Get{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.Single(x => {Predicate(context, type, properties, addCompleteKey)});");
+			}
+		}
+
+		protected virtual void WriteGetByKeyFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, type.ClrType,
+				$"Get{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+
+		protected virtual void WriteGetByKeysAsyncFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, ListType(type, true),
+				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}Async",
+				new Dictionary<string, Type>()
+				{
+					ToEnumerableKeyValuePair(properties, addCompleteKey),
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.Where(x => {PredicateContains(context, type, properties, addCompleteKey)}).ToListAsync(cancellationToken)");
+
+				using (context.Output.Current.WithIndent())
+				{
+					context.Output.Current.WriteLine(
+						$".ContinueWith<{ListType(type).Name()}>(t => t.Result, TaskContinuationOptions.ExecuteSynchronously);");
+				}
+			}
+		}
+
+		protected virtual void WriteGetByKeysAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, ListType(type, true),
+				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}Async",
+				new Dictionary<string, Type>()
+				{
+					ToEnumerableKeyValuePair(properties, addCompleteKey),
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteGetByKeysFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, ListType(type),
+				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}",
+				new Dictionary<string, Type>()
+				{
+					ToEnumerableKeyValuePair(properties, addCompleteKey)
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.Where(x => {PredicateContains(context, type, properties, addCompleteKey)}).ToList();");
+			}
+		}
+
+		protected virtual void WriteGetByKeysFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, ListType(type),
+				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}",
+				new Dictionary<string, Type>()
+				{
+					ToEnumerableKeyValuePair(properties, addCompleteKey)
+				});
+
+		protected virtual void WriteGetMultipleByKeyAsyncFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, ListType(type, true),
+				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.Where(x => {Predicate(context, type, properties, addCompleteKey)}).ToListAsync(cancellationToken)");
+
+				using (context.Output.Current.WithIndent())
+				{
+					context.Output.Current.WriteLine(
+						$".ContinueWith<{ListType(type).Name()}>(t => t.Result, TaskContinuationOptions.ExecuteSynchronously);");
+				}
+			}
+		}
+
+		protected virtual void WriteGetMultipleByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, ListType(type, true),
+				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteGetMultipleByKeyFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, ListType(type),
+				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.Where(x => {Predicate(context, type, properties, addCompleteKey)}).ToList();");
+			}
+		}
+
+		protected virtual void WriteGetMultipleByKeyFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, ListType(type),
+				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+
+		protected virtual void WriteHeader(IScriptContext context) =>
+			context.Output.Current.WriteLine(Header).WriteLine();
+
+		protected virtual IDisposable WriteInterfaceHeader(IScriptContext context, string name) =>
+			context.Output.Current.WriteScope($"public interface I{name}Repository");
+
+		protected virtual IDisposable WriteNamespace(IScriptContext context) =>
+			context.Output.Current.WriteScope($"namespace {Namespace}");
+
+		protected virtual void WriteRemoveByKeyAsyncFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, typeof(Task),
+				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.SingleAsync(x => {Predicate(context, type, properties, addCompleteKey)}, cancellationToken)");
+
+				using (context.Output.Current.WithIndent())
+				{
+					context.Output.Current.WriteLine(
+						$".ContinueWith(t => {Set(context, type)}.Remove(t.Result), TaskContinuationOptions.ExecuteSynchronously);");
+				}
+			}
+		}
+
+		protected virtual void WriteRemoveByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, typeof(Task),
+				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteRemoveByKeyFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, null,
+				$"Remove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))))
+			{
+				context.Output.Current.WriteLine(
+					$"{Set(context, type)}.Remove({Set(context, type)}.Single(x => {Predicate(context, type, properties, addCompleteKey)}));");
+			}
+		}
+
+		protected virtual void WriteRemoveByKeyFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, null,
+				$"Remove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+
+		protected virtual void WriteRemoveByKeysAsyncFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, typeof(Task),
+				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}Async",
+				new Dictionary<string, Type>()
+				{
+					ToEnumerableKeyValuePair(properties, addCompleteKey),
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.Where(x => {PredicateContains(context, type, properties, addCompleteKey)}).ToListAsync(cancellationToken)");
+
+				using (context.Output.Current.WithIndent())
+				{
+					context.Output.Current.WriteLine(
+						$".ContinueWith(t => {Set(context, type)}.RemoveRange(t.Result), TaskContinuationOptions.ExecuteSynchronously);");
+				}
+			}
+		}
+
+		protected virtual void WriteRemoveByKeysAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, typeof(Task),
+				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}Async",
+				new Dictionary<string, Type>()
+				{
+					ToEnumerableKeyValuePair(properties, addCompleteKey),
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteRemoveByKeysFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, null,
+				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}",
+				new Dictionary<string, Type>()
+				{
+					ToEnumerableKeyValuePair(properties, addCompleteKey)
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"{Set(context, type)}.RemoveRange({Set(context, type)}.Where(x => {PredicateContains(context, type, properties, addCompleteKey)}));");
+			}
+		}
+
+		protected virtual void WriteRemoveByKeysFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, null,
+				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}",
+				new Dictionary<string, Type>()
+				{
+					ToEnumerableKeyValuePair(properties, addCompleteKey)
+				});
+
+		protected virtual void WriteRemoveFunction(IScriptContext context, IEntityType type, bool addEntityName)
+		{
+			using (WriteFunctionHeader(context, null, $"Remove{Entity(addEntityName, type)}",
+				new Dictionary<string, Type>()
+				{
+					{ "entity", type.ClrType }
+				}))
+			{
+				context.Output.Current.WriteLine($"{Set(context, type)}.Remove(entity);");
+			}
+		}
+
+		protected virtual void
+			WriteRemoveFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+			WriteFunctionSignature(context, null, $"Remove{Entity(addEntityName, type)}", new Dictionary<string, Type>()
+			{
+				{ "entity", type.ClrType }
+			});
+
+		protected virtual void WriteRemoveMultipleByKeyAsyncFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, typeof(Task),
+				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.Where(x => {Predicate(context, type, properties, addCompleteKey)}).ToListAsync(cancellationToken)");
+
+				using (context.Output.Current.WithIndent())
+				{
+					context.Output.Current.WriteLine(
+						$".ContinueWith(t => {Set(context, type)}.RemoveRange(t.Result), TaskContinuationOptions.ExecuteSynchronously);");
+				}
+			}
+		}
+
+		protected virtual void WriteRemoveMultipleByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, typeof(Task),
+				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteRemoveMultipleByKeyFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, null,
+				$"Remove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))))
+			{
+				context.Output.Current.WriteLine(
+					$"{Set(context, type)}.RemoveRange({Set(context, type)}.Where(x => {Predicate(context, type, properties, addCompleteKey)}));");
+			}
+		}
+
+		protected virtual void WriteRemoveMultipleByKeyFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, null,
+				$"Remove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+
+		protected virtual void WriteRemoveRangeFunction(IScriptContext context, IEntityType type, bool addEntityName)
+		{
+			using (WriteFunctionHeader(context, null, $"Remove{Entity(addEntityName, type, true)}",
+				new Dictionary<string, Type>()
+				{
+					{ "entities", typeof(IEnumerable<>).MakeGenericType(type.ClrType) }
+				}))
+			{
+				context.Output.Current.WriteLine($"{Set(context, type)}.RemoveRange(entities);");
+			}
+		}
+
+		protected virtual void
+			WriteRemoveRangeFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+			WriteFunctionSignature(context, null, $"Remove{Entity(addEntityName, type, true)}",
+				new Dictionary<string, Type>()
+				{
+					{ "entities", typeof(IEnumerable<>).MakeGenericType(type.ClrType) }
+				});
+
+		protected virtual void WriteTryGetByKeyAsyncFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, typeof(Task<>).MakeGenericType(type.ClrType),
+				$"TryGet{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.SingleOrDefaultAsync(x => {Predicate(context, type, properties, addCompleteKey)}, cancellationToken);");
+			}
+		}
+
+		protected virtual void WriteTryGetByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, typeof(Task<>).MakeGenericType(type.ClrType),
+				$"TryGet{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteTryGetByKeyFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, type.ClrType,
+				$"TryGet{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.SingleOrDefault(x => {Predicate(context, type, properties, addCompleteKey)});");
+			}
+		}
+
+		protected virtual void WriteTryGetByKeyFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, type.ClrType,
+				$"TryGet{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+
+		protected virtual void WriteTryRemoveByKeyAsyncFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, typeof(Task<bool>),
+				$"TryRemove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				}))
+			{
+				context.Output.Current.WriteLine(
+					$"return {Set(context, type)}.SingleOrDefaultAsync(x => {Predicate(context, type, properties, addCompleteKey)}, cancellationToken)");
+
+				using (context.Output.Current.WithIndent())
+				{
+					context.Output.Current.WriteLine(".ContinueWith(t =>");
+					context.Output.Current.WriteLine("{");
+
+					using (context.Output.Current.WithIndent())
+					{
+						context.Output.Current.WriteLine("if (t.Result == null) return false;").WriteLine();
+						context.Output.Current.WriteLine($"{Set(context, type)}.Remove(t.Result);");
+						context.Output.Current.WriteLine("return true;");
+					}
+
+					context.Output.Current.WriteLine("}, TaskContinuationOptions.ExecuteSynchronously);");
+				}
+			}
+		}
+
+		protected virtual void WriteTryRemoveByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, typeof(Task<bool>),
+				$"TryRemove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}Async",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
+				{
+					{ "cancellationToken", typeof(CancellationToken) }
+				});
+
+		protected virtual void WriteTryRemoveByKeyFunction(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
+			using (WriteFunctionHeader(context, typeof(bool),
+				$"TryRemove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))))
+			{
+				context.Output.Current
+					.WriteLine(
+						$"{type.ClrType.Name()} entity = {Set(context, type)}.SingleOrDefault(x => {Predicate(context, type, properties, addCompleteKey)});")
+					.WriteLine();
+				context.Output.Current.WriteLine("if (entity == null) return false;").WriteLine();
+				context.Output.Current.WriteLine($"{Set(context, type)}.Remove(entity);");
+				context.Output.Current.WriteLine("return true;");
+			}
+		}
+
+		protected virtual void WriteTryRemoveByKeyFunctionSignature(IScriptContext context, IEntityType type,
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			WriteFunctionSignature(context, typeof(bool),
+				$"TryRemove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
+				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+
+		protected virtual void WriteUsings(IScriptContext context, IEnumerable<IEntityType> types)
+		{
+			context.Output.Current.WriteLine("using System;").WriteLine("using System.Linq;")
+				.WriteLine("using System.Collections.Generic;").WriteLine("using System.Threading;")
+				.WriteLine("using System.Threading.Tasks;").WriteLine("using Microsoft.EntityFrameworkCore;");
+
+			foreach (string @namespace in types.Select(x => x.ClrType.Namespace).Distinct())
+			{
+				context.Output.Current.WriteLine($"using {@namespace};");
+			}
+
+			foreach (string @namespace in AdditionalNamespaces)
 			{
 				context.Output.Current.WriteLine($"using {@namespace};");
 			}
 
 			context.Output.Current.WriteLine();
-		};
-
-		public virtual void WriteFunctionBasicAdd(IFileWriter fileWriter, IEntityType entityType, bool addEntityTypeToFunctionName = false)
-		{
-			string functionName = FunctionNameBasicAdd;
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			WriteFunction(fileWriter, GetFunctionHeader("void", functionName, $"{GetEntityType(entityType)} entity"),
-				GetFunctionBodyBasicAdd(entityType));
-		}
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, bool> WriteAddFunction { get; set; } =
-			(host, context, type, addEntityName) =>
-			{
-				using (host.WriteFunctionHeader(host, context, null, $"Add{(addEntityName ? type.ClrType.Name : string.Empty)}",
-					new Dictionary<string, Type>() { { type.ClrType.Name.FirstCharacterToLower(), type.ClrType } }))
-				{
-					context.Output.Current.WriteLine($"{host.Set(host, context, type)}.Add({type.ClrType.Name.FirstCharacterToLower()});");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, bool> WriteAddAsyncFunction { get; set; } =
-			(host, context, type, addEntityName) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(Task), $"Add{(addEntityName ? type.ClrType.Name : string.Empty)}Async",
-					new Dictionary<string, Type>() { { type.ClrType.Name.FirstCharacterToLower(), type.ClrType }, { "cancellationToken", typeof(CancellationToken) } }))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.AddAsync({type.ClrType.Name.FirstCharacterToLower()}, cancellationToken);");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, bool> WriteRemoveFunction { get; set; } =
-			(host, context, type, addEntityName) =>
-			{
-				using (host.WriteFunctionHeader(host, context, null, $"Remove{(addEntityName ? type.ClrType.Name : string.Empty)}",
-					new Dictionary<string, Type>() { { type.ClrType.Name.FirstCharacterToLower(), type.ClrType } }))
-				{
-					context.Output.Current.WriteLine($"{host.Set(host, context, type)}.Remove({type.ClrType.Name.FirstCharacterToLower()});");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, bool> WriteRemoveRangeFunction { get; set; } =
-			(host, context, type, addEntityName) =>
-			{
-				using (host.WriteFunctionHeader(host, context, null, $"Remove{(addEntityName ? type.ClrType.Name.Pluralize() : string.Empty)}",
-					new Dictionary<string, Type>() { { type.ClrType.Name.Pluralize().FirstCharacterToLower(), typeof(IEnumerable<>).MakeGenericType(type.ClrType) } }))
-				{
-					context.Output.Current.WriteLine($"{host.Set(host, context, type)}.RemoveRange({type.ClrType.Name.Pluralize().FirstCharacterToLower()});");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, bool> WriteGetAllFunction { get; set; } =
-			(host, context, type, addEntityName) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(IList<>).MakeGenericType(type.ClrType), $"GetAll{(addEntityName ? type.ClrType.Name.Pluralize() : string.Empty)}",
-					new Dictionary<string, Type>()))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.ToList();");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, bool> WriteGetAllAsyncFunction { get; set; } =
-			(host, context, type, addEntityName) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(Task<>).MakeGenericType(typeof(IList<>).MakeGenericType(type.ClrType)), $"GetAll{(addEntityName ? type.ClrType.Name.Pluralize() : string.Empty)}Async",
-					new Dictionary<string, Type>() { { "cancellationToken", typeof(CancellationToken) } }))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.ToListAsync(cancellationToken).ContinueWith<{typeof(IList<>).MakeGenericType(type.ClrType).Name()}>(t => t.Result, TaskContinuationOptions.ExecuteSynchronously);");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteGetByKeyFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, type.ClrType, $"Get{(addEntityName ? type.ClrType.Name : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name)) : "Id")}",
-					new Dictionary<string, Type>(properties.ToDictionary(x => x.Name.FirstCharacterToLower(), y => y.ClrType))))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.Single(x => {host.Predicate(host, context, type, properties)});");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteGetByKeyAsyncFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(Task<>).MakeGenericType(type.ClrType), $"Get{(addEntityName ? type.ClrType.Name : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name)) : "Id")}Async",
-					new Dictionary<string, Type>(properties.ToDictionary(x => x.Name.FirstCharacterToLower(), y => y.ClrType)) { { "cancellationToken", typeof(CancellationToken) } }))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.SingleAsync(x => {host.Predicate(host, context, type, properties)}, cancellationToken);");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteTryGetByKeyFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, type.ClrType, $"TryGet{(addEntityName ? type.ClrType.Name.Pluralize() : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name)) : "Id")}",
-					new Dictionary<string, Type>(properties.ToDictionary(x => x.Name.FirstCharacterToLower(), y => y.ClrType))))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.SingleOrDefault(x => {host.Predicate(host, context, type, properties)});");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteTryGetByKeyAsyncFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(Task<>).MakeGenericType(type.ClrType), $"TryGet{(addEntityName ? type.ClrType.Name.Pluralize() : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name)) : "Id")}Async",
-					new Dictionary<string, Type>(properties.ToDictionary(x => x.Name.FirstCharacterToLower(), y => y.ClrType)) { { "cancellationToken", typeof(CancellationToken) } }))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.SingleOrDefaultAsync(x => {host.Predicate(host, context, type, properties)}, cancellationToken);");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteGetByKeysFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(IList<>).MakeGenericType(type.ClrType), $"Get{(addEntityName ? type.ClrType.Name.Pluralize() : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name.Pluralize())) : "Ids")}",
-					new Dictionary<string, Type>()
-					{
-						{
-							string.Join("And", properties.Select(x => x.Name.Pluralize())).FirstCharacterToLower(),
-							properties.Count == 1 ? typeof(IEnumerable<>).MakeGenericType(properties.Single().ClrType) : typeof(IEnumerable<>).MakeGenericType(GetTupleType(properties.Select(x => x.ClrType).ToArray()))
-						}
-					}))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.Where(x => {host.PredicateContains(host, context, type, properties)}).ToList();");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteGetByKeysAsyncFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(Task<>).MakeGenericType(typeof(IList<>).MakeGenericType(type.ClrType)), $"Get{(addEntityName ? type.ClrType.Name.Pluralize() : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name.Pluralize())) : "Ids")}Async",
-					new Dictionary<string, Type>()
-					{
-						{
-							string.Join("And", properties.Select(x => x.Name.Pluralize())).FirstCharacterToLower(),
-							properties.Count == 1 ? typeof(IEnumerable<>).MakeGenericType(properties.Single().ClrType) : typeof(IEnumerable<>).MakeGenericType(GetTupleType(properties.Select(x => x.ClrType).ToArray()))
-						}, { "cancellationToken", typeof(CancellationToken) }
-					}))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.Where(x => {host.PredicateContains(host, context, type, properties)}).ToListAsync(cancellationToken)");
-
-					using (context.Output.Current.WithIndent())
-					{
-						context.Output.Current.WriteLine(
-							$".ContinueWith<{typeof(IList<>).MakeGenericType(type.ClrType).Name()}>(t => t.Result, TaskContinuationOptions.ExecuteSynchronously);");
-					}
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteRemoveByKeyFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, null, $"Remove{(addEntityName ? type.ClrType.Name : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name)) : "Id")}",
-					new Dictionary<string, Type>(properties.ToDictionary(x => x.Name.FirstCharacterToLower(), y => y.ClrType))))
-				{
-					context.Output.Current.WriteLine($"{host.Set(host, context, type)}.Remove({host.Set(host, context, type)}.Single(x => {host.Predicate(host, context, type, properties)}));");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteRemoveByKeyAsyncFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(Task), $"Remove{(addEntityName ? type.ClrType.Name : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name)) : "Id")}Async",
-					new Dictionary<string, Type>(properties.ToDictionary(x => x.Name.FirstCharacterToLower(), y => y.ClrType)) { { "cancellationToken", typeof(CancellationToken) } }))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.SingleAsync(x => {host.Predicate(host, context, type, properties)}, cancellationToken)");
-
-					using(context.Output.Current.WithIndent())
-					{
-						context.Output.Current.WriteLine($".ContinueWith(t => {host.Set(host, context, type)}.Remove(t.Result), TaskContinuationOptions.ExecuteSynchronously);");
-					}
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteTryRemoveByKeyFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(bool), $"TryRemove{(addEntityName ? type.ClrType.Name : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name)) : "Id")}",
-					new Dictionary<string, Type>(properties.ToDictionary(x => x.Name.FirstCharacterToLower(), y => y.ClrType))))
-				{
-					context.Output.Current.WriteLine($"{type.ClrType.Name()} entity = {host.Set(host, context, type)}.SingleOrDefault(x => {host.Predicate(host, context, type, properties)});").WriteLine();
-					context.Output.Current.WriteLine("if (entity == null) return false;").WriteLine();
-					context.Output.Current.WriteLine($"{host.Set(host, context, type)}.Remove(entity);");
-					context.Output.Current.WriteLine("return true;");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteTryRemoveByKeyAsyncFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(Task<bool>), $"TryRemove{(addEntityName ? type.ClrType.Name : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name)) : "Id")}Async",
-					new Dictionary<string, Type>(properties.ToDictionary(x => x.Name.FirstCharacterToLower(), y => y.ClrType)) { { "cancellationToken", typeof(CancellationToken) } }))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.SingleOrDefaultAsync(x => {host.Predicate(host, context, type, properties)}, cancellationToken)");
-
-					using (context.Output.Current.WithIndent())
-					{
-						context.Output.Current.WriteLine(".ContinueWith(t =>");
-						context.Output.Current.WriteLine("{");
-
-						using (context.Output.Current.WithIndent())
-						{
-							context.Output.Current.WriteLine("if (t.Result == null) return false;").WriteLine();
-							context.Output.Current.WriteLine($"{host.Set(host, context, type)}.Remove(t.Result);");
-							context.Output.Current.WriteLine("return true;");
-						}
-
-						context.Output.Current.WriteLine("}, TaskContinuationOptions.ExecuteSynchronously);");
-					}
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteRemoveByKeysFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, null, $"Remove{(addEntityName ? type.ClrType.Name.Pluralize() : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name.Pluralize())) : "Ids")}",
-					new Dictionary<string, Type>()
-					{
-						{
-							string.Join("And", properties.Select(x => x.Name.Pluralize())).FirstCharacterToLower(),
-							properties.Count == 1 ? typeof(IEnumerable<>).MakeGenericType(properties.Single().ClrType) : typeof(IEnumerable<>).MakeGenericType(GetTupleType(properties.Select(x => x.ClrType).ToArray()))
-						}
-					}))
-				{
-					context.Output.Current.WriteLine($"{host.Set(host, context, type)}.RemoveRange({host.Set(host, context, type)}.Where(x => {host.PredicateContains(host, context, type, properties)}));");
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool> WriteRemoveByKeysAsyncFunction { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey) =>
-			{
-				using (host.WriteFunctionHeader(host, context, typeof(Task), $"Remove{(addEntityName ? type.ClrType.Name.Pluralize() : string.Empty)}By{(addCompleteKey ? string.Join("And", properties.Select(x => x.Name.Pluralize())) : "Ids")}Async",
-					new Dictionary<string, Type>()
-					{
-						{
-							string.Join("And", properties.Select(x => x.Name.Pluralize())).FirstCharacterToLower(),
-							properties.Count == 1 ? typeof(IEnumerable<>).MakeGenericType(properties.Single().ClrType) : typeof(IEnumerable<>).MakeGenericType(GetTupleType(properties.Select(x => x.ClrType).ToArray()))
-						}, { "cancellationToken", typeof(CancellationToken) }
-					}))
-				{
-					context.Output.Current.WriteLine($"return {host.Set(host, context, type)}.Where(x => {host.PredicateContains(host, context, type, properties)}).ToListAsync(cancellationToken)");
-
-					using (context.Output.Current.WithIndent())
-					{
-						context.Output.Current.WriteLine(
-							$".ContinueWith(t => {host.Set(host, context, type)}.RemoveRange(t.Result), TaskContinuationOptions.ExecuteSynchronously);");
-					}
-				}
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, bool> WriteBasicFunctions2 { get; set; } =
-			(host, context, type, addEntityName) =>
-			{
-				host.WriteAddFunction(host, context, type, addEntityName);
-				host.WriteAddAsyncFunction(host, context, type, addEntityName);
-				host.WriteRemoveFunction(host, context, type, addEntityName);
-				host.WriteRemoveRangeFunction(host, context, type, addEntityName);
-				host.WriteGetAllFunction(host, context, type, addEntityName);
-				host.WriteGetAllAsyncFunction(host, context, type, addEntityName);
-			};
-
-		public Action<BaseHost<T>, IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool, bool, bool> WriteFunctions { get; set; } =
-			(host, context, type, properties, addEntityName, addCompleteKey, unique, async) =>
-			{
-				host.WriteGetByKeyFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				if(async) host.WriteGetByKeyAsyncFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				host.WriteTryGetByKeyFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				if (async) host.WriteTryGetByKeyAsyncFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				host.WriteGetByKeysFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				if (async) host.WriteGetByKeysAsyncFunction(host, context, type, properties, addEntityName, addCompleteKey);
-
-				host.WriteRemoveByKeyFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				if (async) host.WriteRemoveByKeyAsyncFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				host.WriteTryRemoveByKeyFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				if (async) host.WriteTryRemoveByKeyAsyncFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				host.WriteRemoveByKeysFunction(host, context, type, properties, addEntityName, addCompleteKey);
-				if (async) host.WriteRemoveByKeysAsyncFunction(host, context, type, properties, addEntityName, addCompleteKey);
-			};
-
-		public virtual void ProcessEntity(IScriptContext context, IEntityType type)
-		{
-			context.Logger.WriteDebug($"Processing entity '{type.Name}'.");
-
-			context.Output.CurrentGeneratedFileName.FileNameWithoutExtension = GeneratedFileNameForEntity(this, context, type);
-
-			WriteHeader(this, context, type);
-
-			using (WriteNamespace(this, context, type))
-			{
-				WriteUsings(this, context, type);
-
-				ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
-
-				using (WriteClassHeader(this, context, type))
-				{
-					WriteConstructor(this, context, type);
-					WriteBasicFunctions2(this, context, type, false);
-
-					IKey key = type.FindPrimaryKey();
-
-					bool async = true;
-
-					WriteFunctions(this, context, type, key.Properties, false, false, true, async);
-					addedFunctions.Add(key.Properties);
-
-					foreach (IIndex index in type.GetIndexes())
-					{
-						if (!addedFunctions.Contains(index.Properties))
-						{
-							WriteFunctions(this, context, type, index.Properties, true, true, index.IsUnique, async);
-							addedFunctions.Add(index.Properties);
-						}
-					}
-
-					foreach (IForeignKey foreignKey in type.GetForeignKeys())
-					{
-						if (!addedFunctions.Contains(foreignKey.Properties))
-						{
-							WriteFunctions(this, context, type, foreignKey.Properties, true, true, foreignKey.IsUnique, async);
-							addedFunctions.Add(foreignKey.Properties);
-						}
-					}
-
-					//using (WriteFunctionHeader(this, context, null, $"RemoveBy{string.Join("And", key.Properties.Select(x => x.Name.Pluralize()))}",
-					//	new Dictionary<string, Type>() { { string.Join("And", key.Properties.Select(x => x.Name.Pluralize())).FirstCharacterToLower(), key.Properties.Count == 1 ? typeof(IEnumerable<>).MakeGenericType(key.Properties.Single().ClrType) : typeof(IEnumerable<>).MakeGenericType(GetTupleType(key.Properties.Select(x => x.ClrType).ToArray())) } }, false))
-					//{
-					//	context.Output.Current.WriteLine($"{Set(this, context, type)}.RemoveRange({Set(this, context, type)}.Where(x => {PredicateContains(this, context, type, key)}));");
-					//}
-
-					//using (WriteFunctionHeader(this, context, typeof(Task), $"RemoveBy{string.Join("And", key.Properties.Select(x => x.Name.Pluralize()))}Async",
-					//	new Dictionary<string, Type>() { { string.Join("And", key.Properties.Select(x => x.Name.Pluralize())).FirstCharacterToLower(), key.Properties.Count == 1 ? typeof(IEnumerable<>).MakeGenericType(key.Properties.Single().ClrType) : typeof(IEnumerable<>).MakeGenericType(GetTupleType(key.Properties.Select(x => x.ClrType).ToArray())) } }, false))
-					//{
-					//	context.Output.Current.WriteLine($"{typeof(Task<>).MakeGenericType(typeof(List<>).MakeGenericType(type.ClrType)).Name()} task = {Set(this, context, type)}.Where(x => {PredicateContains(this, context, type, key)}).ToListAsync();");
-					//	context.Output.Current.WriteLine($"return task.ContinueWith(t => {Set(this, context, type)}.RemoveRange(t.Result), TaskContinuationOptions.ExecuteSynchronously);");
-					//}
-
-					//return
-					//	$"{GetEntityType(type)} entity = await {GetSetAccessor(type)}.SingleAsync({GetPredicate(properties)}, cancellationToken);" +
-					//	Environment.NewLine + Environment.NewLine + $"{GetSetAccessor(type)}.Remove(entity);";
-				}
-
-				//using (fileWriter.WriteScope(Smart.Format(RepositoryClassHeader, new
-				//{Ge
-				//	Name = type.ClrType.Name(),
-				//})))
-				//{
-				//	using (fileWriter.WriteScope(Smart.Format(RepositoryConstructorHeader, new
-				//	{
-				//		Name = type.ClrType.Name(),
-				//	})))
-				//	{
-				//	}
-
-				//	WriteBasicFunctions(fileWriter, type);
-
-				//	IKey primaryKey = type.FindPrimaryKey();
-
-				//	ProcessPrimaryKey(addedFunctions, fileWriter, type, primaryKey);
-
-				//	foreach (IIndex index in type.GetIndexes())
-				//	{
-				//		ProcessIndex(addedFunctions, fileWriter, type, index);
-				//	}
-
-				//	foreach (IForeignKey foreignKey in type.GetForeignKeys())
-				//	{
-				//		ProcessForeignKey(addedFunctions, fileWriter, type, foreignKey);
-				//	}
-
-				//	foreach (IProperty property in type.GetProperties())
-				//	{
-				//		ProcessProperty(addedFunctions, fileWriter, type, property);
-				//	}
-				//}
-			}
-		}
-
-		public virtual void ProcessEntityCollection(IScriptContext scriptContext, IEnumerable<IEntityType> entityTypes,
-			string collectionName)
-		{
-			//IEnumerable<IEntityType> enumerable = entityTypes as IList<IEntityType> ?? entityTypes.ToList();
-
-			//context.Logger.WriteDebug($"Processing entity collection '{string.Join(", ", enumerable.Select(x => x.Name))}'.");
-
-			//context.Output.CurrentGeneratedFileName.FileNameWithoutExtension = $"{collectionName}Repository";
-
-			//IFileWriter fileWriter = context.Output.Current;
-
-			//fileWriter.WriteLine(Header).WriteLine();
-
-			//using (fileWriter.WriteScope($"namespace {Namespace}"))
-			//{
-			//	fileWriter.WriteLine("using System;")
-			//		.WriteLine("using System.Threading;")
-			//		.WriteLine("using System.Threading.Tasks;")
-			//		.WriteLine("using System.Collections.Generic;");
-
-			//	foreach (string entityTypeNamespace in enumerable.Select(x => x.ClrType.Namespace).Distinct())
-			//	{
-			//		fileWriter.WriteLine($"using {entityTypeNamespace};");
-			//	}
-
-			//	fileWriter.WriteLine();
-
-			//	ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
-
-			//	using (fileWriter.WriteScope(Smart.Format(RepositoryClassHeader, new
-			//	{
-			//		Name = collectionName,
-			//	})))
-			//	{
-			//		using (fileWriter.WriteScope(Smart.Format(RepositoryConstructorHeader, new
-			//		{
-			//			Name = collectionName,
-			//		})))
-			//		{
-			//		}
-
-			//		foreach (IEntityType type in enumerable)
-			//		{
-			//			WriteBasicFunctions(fileWriter, type, true);
-
-			//			IKey primaryKey = type.FindPrimaryKey();
-
-			//			ProcessPrimaryKey(addedFunctions, fileWriter, type, primaryKey, true);
-
-			//			foreach (IIndex index in type.GetIndexes())
-			//			{
-			//				ProcessIndex(addedFunctions, fileWriter, type, index, true);
-			//			}
-
-			//			foreach (IForeignKey foreignKey in type.GetForeignKeys())
-			//			{
-			//				ProcessForeignKey(addedFunctions, fileWriter, type, foreignKey, true);
-			//			}
-
-			//			foreach (IProperty property in type.GetProperties())
-			//			{
-			//				ProcessProperty(addedFunctions, fileWriter, type, property, true);
-			//			}
-			//		}
-			//	}
-			//}
-		}
-
-		public virtual void ProcessEntityCollectionInterfaces(IScriptContext scriptContext, IEnumerable<IEntityType> entityTypes,
-			string collectionName)
-		{
-			IEnumerable<IEntityType> enumerable = entityTypes as IList<IEntityType> ?? entityTypes.ToList();
-
-			scriptContext.Logger.WriteDebug(
-				$"Processing entity collection '{string.Join(", ", enumerable.Select(x => x.Name))}' (interface).");
-
-			scriptContext.Output.CurrentGeneratedFileName.FileNameWithoutExtension = $"I{collectionName}Repository";
-
-			IFileWriter fileWriter = scriptContext.Output.Current;
-
-			fileWriter.WriteLine(Header).WriteLine();
-
-			using (fileWriter.WriteScope($"namespace {Namespace}"))
-			{
-				fileWriter.WriteLine("using System;")
-					.WriteLine("using System.Threading;")
-					.WriteLine("using System.Threading.Tasks;")
-					.WriteLine("using System.Collections.Generic;");
-
-				foreach (string entityTypeNamespace in enumerable.Select(x => x.ClrType.Namespace).Distinct())
-				{
-					fileWriter.WriteLine($"using {entityTypeNamespace};");
-				}
-
-				fileWriter.WriteLine();
-
-				ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
-
-				using (fileWriter.WriteScope(Smart.Format(RepositoryInterfaceHeader, new
-				{
-					Name = collectionName,
-				})))
-				{
-					foreach (IEntityType entityType in enumerable)
-					{
-						WriteBasicFunctionSignatures(fileWriter, entityType, true);
-
-						IKey primaryKey = entityType.FindPrimaryKey();
-
-						ProcessPrimaryKeyInterface(addedFunctions, fileWriter, entityType, primaryKey, true);
-
-						foreach (IIndex index in entityType.GetIndexes())
-						{
-							ProcessIndexInterface(addedFunctions, fileWriter, entityType, index, true);
-						}
-
-						foreach (IForeignKey foreignKey in entityType.GetForeignKeys())
-						{
-							ProcessForeignKeyInterface(addedFunctions, fileWriter, entityType, foreignKey, true);
-						}
-
-						foreach (IProperty property in entityType.GetProperties())
-						{
-							ProcessPropertyInterface(addedFunctions, fileWriter, entityType, property, true);
-						}
-					}
-				}
-			}
-		}
-
-		public virtual void ProcessEntityInterface(IScriptContext scriptContext, IEntityType entityType)
-		{
-			scriptContext.Logger.WriteDebug($"Processing entity '{entityType.Name}' (interface).");
-
-			scriptContext.Output.CurrentGeneratedFileName.FileNameWithoutExtension = $"I{entityType.ClrType.Name()}Repository";
-
-			IFileWriter fileWriter = scriptContext.Output.Current;
-
-			fileWriter.WriteLine(Header).WriteLine();
-
-			using (fileWriter.WriteScope($"namespace {Namespace}"))
-			{
-				fileWriter.WriteLine("using System;")
-					.WriteLine("using System.Threading;")
-					.WriteLine("using System.Threading.Tasks;")
-					.WriteLine("using System.Collections.Generic;")
-					.WriteLine($"using {entityType.ClrType.Namespace};")
-					.WriteLine();
-
-				ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
-
-				using (fileWriter.WriteScope(Smart.Format(RepositoryInterfaceHeader, new
-				{
-					Name = entityType.ClrType.Name(),
-				})))
-				{
-					WriteBasicFunctionSignatures(fileWriter, entityType);
-
-					IKey primaryKey = entityType.FindPrimaryKey();
-
-					ProcessPrimaryKeyInterface(addedFunctions, fileWriter, entityType, primaryKey);
-
-					foreach (IIndex index in entityType.GetIndexes())
-					{
-						ProcessIndexInterface(addedFunctions, fileWriter, entityType, index);
-					}
-
-					foreach (IForeignKey foreignKey in entityType.GetForeignKeys())
-					{
-						ProcessForeignKeyInterface(addedFunctions, fileWriter, entityType, foreignKey);
-					}
-
-					foreach (IProperty property in entityType.GetProperties())
-					{
-						ProcessPropertyInterface(addedFunctions, fileWriter, entityType, property);
-					}
-				}
-			}
-		}
-
-		public virtual void ProcessForeignKey(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter, IEntityType entityType,
-			IForeignKey foreignKey, bool addEntityTypeToFunctionNames = false)
-		{
-			if (foreignKey.IsUnique)
-			{
-				ProcessUnique(addedFunctions, fileWriter, entityType, foreignKey.Properties, addEntityTypeToFunctionNames);
-			}
-			else
-			{
-				ProcessNonUnique(addedFunctions, fileWriter, entityType, foreignKey.Properties, addEntityTypeToFunctionNames);
-			}
-		}
-
-		public virtual void ProcessForeignKeyInterface(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter,
-			IEntityType entityType, IForeignKey foreignKey, bool addEntityTypeToFunctionNames = false)
-		{
-			if (foreignKey.IsUnique)
-			{
-				ProcessUniqueInterface(addedFunctions, fileWriter, entityType, foreignKey.Properties, addEntityTypeToFunctionNames);
-			}
-			else
-			{
-				ProcessNonUniqueInterface(addedFunctions, fileWriter, entityType, foreignKey.Properties, addEntityTypeToFunctionNames);
-			}
-		}
-
-		public virtual void ProcessIndex(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter, IEntityType entityType,
-			IIndex index, bool addEntityTypeToFunctionNames = false)
-		{
-			if (index.IsUnique)
-			{
-				ProcessUnique(addedFunctions, fileWriter, entityType, index.Properties, addEntityTypeToFunctionNames);
-			}
-			else
-			{
-				ProcessNonUnique(addedFunctions, fileWriter, entityType, index.Properties, addEntityTypeToFunctionNames);
-			}
-		}
-
-		public virtual void ProcessIndexInterface(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter,
-			IEntityType entityType, IIndex index, bool addEntityTypeToFunctionNames = false)
-		{
-			if (index.IsUnique)
-			{
-				ProcessUniqueInterface(addedFunctions, fileWriter, entityType, index.Properties, addEntityTypeToFunctionNames);
-			}
-			else
-			{
-				ProcessNonUniqueInterface(addedFunctions, fileWriter, entityType, index.Properties, addEntityTypeToFunctionNames);
-			}
-		}
-
-		public virtual void ProcessNonUnique(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, bool addEntityTypeToFunctionNames = false)
-		{
-			////if (properties.Any(x => x.IsShadowProperty))
-			////{
-			////	return;
-			////}
-
-			////if (!addedFunctions.Any(x => x.SequenceEqual(properties.ToList())))
-			////{
-			////	WriteFunctionGetMultiple(fileWriter, type, properties, addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-			////	WriteFunctionGetMultipleByValues(fileWriter, type, properties,
-			////		addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-
-			////	WriteFunctionRemoveMultiple(fileWriter, type, properties, addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-			////	WriteFunctionRemoveMultipleByValues(fileWriter, type, properties,
-			////		addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-
-			////	addedFunctions.Add(properties);
-			////}
-		}
-
-		public virtual void ProcessNonUniqueInterface(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter,
-			IEntityType entityType, IReadOnlyList<IProperty> properties, bool addEntityTypeToFunctionNames = false)
-		{
-			////if (properties.Any(x => x.IsShadowProperty))
-			////{
-			////	return;
-			////}
-
-			////if (!addedFunctions.Any(x => x.SequenceEqual(properties.ToList())))
-			////{
-			////	WriteFunctionSignatureGetMultiple(fileWriter, type, properties,
-			////		addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-			////	WriteFunctionSignatureGetMultipleByValues(fileWriter, type, properties,
-			////		addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-
-			////	WriteFunctionSignatureRemoveMultiple(fileWriter, type, properties,
-			////		addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-			////	WriteFunctionSignatureRemoveMultipleByValues(fileWriter, type, properties,
-			////		addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-
-			////	addedFunctions.Add(properties);
-			////}
-		}
-
-		public virtual void ProcessPrimaryKey(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter, IEntityType entityType,
-			IKey primaryKey, bool addEntityTypeToFunctionNames = false)
-		{
-			IReadOnlyList<IProperty> properties = primaryKey.Properties;
-
-			if (properties.Any(x => x.IsShadowProperty))
-			{
-				return;
-			}
-
-			if (!addedFunctions.Any(x => x.SequenceEqual(properties)))
-			{
-				WriteFunctionGetOne(fileWriter, entityType, properties, FunctionNameGetOneForPrimaryKey, addEntityTypeToFunctionNames);
-				WriteFunctionTryGetOne(fileWriter, entityType, properties, FunctionNameTryGetOneForPrimaryKey,
-					addEntityTypeToFunctionNames);
-				WriteFunctionGetMultipleByValues(fileWriter, entityType, properties, FunctionNameGetMultipleForPrimaryKeys,
-					addEntityTypeToFunctionNames);
-
-				WriteFunctionRemoveOne(fileWriter, entityType, properties, FunctionNameRemoveOneForPrimaryKey,
-					addEntityTypeToFunctionNames);
-				WriteFunctionTryRemoveOne(fileWriter, entityType, properties, FunctionNameTryRemoveOneForPrimaryKey,
-					addEntityTypeToFunctionNames);
-				WriteFunctionRemoveMultipleByValues(fileWriter, entityType, properties, FunctionNameRemoveMultipleForPrimaryKeys,
-					addEntityTypeToFunctionNames);
-
-				addedFunctions.Add(properties);
-			}
-		}
-
-		public virtual void ProcessPrimaryKeyInterface(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter,
-			IEntityType entityType, IKey primaryKey, bool addEntityTypeToFunctionNames = false)
-		{
-			IReadOnlyList<IProperty> properties = primaryKey.Properties;
-
-			if (properties.Any(x => x.IsShadowProperty))
-			{
-				return;
-			}
-
-			if (!addedFunctions.Any(x => x.SequenceEqual(properties)))
-			{
-				WriteFunctionSignatureGetOne(fileWriter, entityType, properties, FunctionNameGetOneForPrimaryKey,
-					addEntityTypeToFunctionNames);
-				WriteFunctionSignatureTryGetOne(fileWriter, entityType, properties, FunctionNameTryGetOneForPrimaryKey,
-					addEntityTypeToFunctionNames);
-				WriteFunctionSignatureGetMultipleByValues(fileWriter, entityType, properties, FunctionNameGetMultipleForPrimaryKeys,
-					addEntityTypeToFunctionNames);
-
-				WriteFunctionSignatureRemoveOne(fileWriter, entityType, properties, FunctionNameRemoveOneForPrimaryKey,
-					addEntityTypeToFunctionNames);
-				WriteFunctionSignatureTryRemoveOne(fileWriter, entityType, properties, FunctionNameTryRemoveOneForPrimaryKey,
-					addEntityTypeToFunctionNames);
-				WriteFunctionSignatureRemoveMultipleByValues(fileWriter, entityType, properties, FunctionNameRemoveMultipleForPrimaryKeys,
-					addEntityTypeToFunctionNames);
-
-				addedFunctions.Add(properties);
-			}
-		}
-
-		public virtual void ProcessProperty(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter, IEntityType entityType,
-			IProperty property, bool addEntityTypeToFunctionNames = false)
-		{
-			ProcessNonUnique(addedFunctions, fileWriter, entityType, new[] { property }, addEntityTypeToFunctionNames);
-		}
-
-		public virtual void ProcessPropertyInterface(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter,
-			IEntityType entityType, IProperty property, bool addEntityTypeToFunctionNames = false)
-		{
-			ProcessNonUniqueInterface(addedFunctions, fileWriter, entityType, new[] { property }, addEntityTypeToFunctionNames);
-		}
-
-		public virtual void ProcessUnique(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, bool addEntityTypeToFunctionNames = false)
-		{
-			if (properties.Any(x => x.IsShadowProperty))
-			{
-				return;
-			}
-
-			if (!addedFunctions.Any(x => x.SequenceEqual(properties)))
-			{
-				WriteFunctionGetOne(fileWriter, entityType, properties, addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-				WriteFunctionTryGetOne(fileWriter, entityType, properties, addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-				WriteFunctionGetMultipleByValues(fileWriter, entityType, properties,
-					addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-
-				WriteFunctionRemoveOne(fileWriter, entityType, properties, addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-				WriteFunctionTryRemoveOne(fileWriter, entityType, properties, addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-				WriteFunctionRemoveMultipleByValues(fileWriter, entityType, properties,
-					addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-
-				addedFunctions.Add(properties);
-			}
-		}
-
-		public virtual void ProcessUniqueInterface(ISet<IEnumerable<IProperty>> addedFunctions, IFileWriter fileWriter,
-			IEntityType entityType, IReadOnlyList<IProperty> properties, bool addEntityTypeToFunctionNames = false)
-		{
-			if (properties.Any(x => x.IsShadowProperty))
-			{
-				return;
-			}
-
-			if (!addedFunctions.Any(x => x.SequenceEqual(properties)))
-			{
-				WriteFunctionSignatureGetOne(fileWriter, entityType, properties, addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-				WriteFunctionSignatureTryGetOne(fileWriter, entityType, properties,
-					addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-				WriteFunctionSignatureGetMultipleByValues(fileWriter, entityType, properties,
-					addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-
-				WriteFunctionSignatureRemoveOne(fileWriter, entityType, properties,
-					addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-				WriteFunctionSignatureTryRemoveOne(fileWriter, entityType, properties,
-					addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-				WriteFunctionSignatureRemoveMultipleByValues(fileWriter, entityType, properties,
-					addEntityTypeToFunctionName: addEntityTypeToFunctionNames);
-
-				addedFunctions.Add(properties);
-			}
-		}
-
-		public virtual void WriteBasicFunctions(IFileWriter fileWriter, IEntityType entityType, bool addEntityTypeToFunctionNames = false)
-		{
-			WriteFunctionBasicAdd(fileWriter, entityType, addEntityTypeToFunctionNames);
-			WriteFunctionBasicRemove(fileWriter, entityType, addEntityTypeToFunctionNames);
-			WriteFunctionBasicRemoveMultiple(fileWriter, entityType, addEntityTypeToFunctionNames);
-			WriteFunctionBasicGetAll(fileWriter, entityType, addEntityTypeToFunctionNames);
-		}
-
-		public virtual void WriteBasicFunctionSignatures(IFileWriter fileWriter, IEntityType entityType,
-			bool addEntityTypeToFunctionNames = false)
-		{
-			WriteFunctionSignatureBasicAdd(fileWriter, entityType, addEntityTypeToFunctionNames);
-			WriteFunctionSignatureBasicRemove(fileWriter, entityType, addEntityTypeToFunctionNames);
-			WriteFunctionSignatureBasicRemoveMultiple(fileWriter, entityType, addEntityTypeToFunctionNames);
-			WriteFunctionSignatureBasicGetAll(fileWriter, entityType, addEntityTypeToFunctionNames);
-		}
-
-		public virtual void WriteFunction(IFileWriter fileWriter, string header, string body)
-		{
-			using (fileWriter.WriteLine().WriteScope(header))
-			{
-				fileWriter.WriteLine(body);
-			}
-		}
-
-
-
-		public virtual void WriteFunctionBasicGetAll(IFileWriter fileWriter, IEntityType entityType,
-			bool addEntityTypeToFunctionName = false)
-		{
-			string functionName = FunctionNameBasicGetAll;
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			WriteFunction(fileWriter, GetFunctionHeaderAsync(GetEntityTypeCollection(entityType), functionName, string.Empty),
-				GetFunctionBodyBasicGetAll(entityType));
-		}
-
-		public virtual void WriteFunctionBasicRemove(IFileWriter fileWriter, IEntityType entityType,
-			bool addEntityTypeToFunctionName = false)
-		{
-			string functionName = FunctionNameBasicRemove;
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			WriteFunction(fileWriter, GetFunctionHeader("void", functionName, $"{GetEntityType(entityType)} entity"),
-				GetFunctionBodyBasicRemove(entityType));
-		}
-
-		public virtual void WriteFunctionBasicRemoveMultiple(IFileWriter fileWriter, IEntityType entityType,
-			bool addEntityTypeToFunctionName = false)
-		{
-			string functionName = FunctionNameBasicRemoveMultiple;
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			WriteFunction(fileWriter, GetFunctionHeader("void", functionName, $"IEnumerable<{GetEntityType(entityType)}> entities"),
-				GetFunctionBodyBasicRemoveMultiple(entityType));
-		}
-
-		public virtual void WriteFunctionGetMultiple(IFileWriter fileWriter, IEntityType entityType, IReadOnlyList<IProperty> properties,
-			string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixGetMultiple}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			WriteFunction(fileWriter,
-				GetFunctionHeaderAsync(GetEntityTypeCollection(entityType), functionName, GetParameterList(properties)),
-				GetFunctionBodyReturnWhere(entityType, properties));
-		}
-
-		public virtual void WriteFunctionGetMultipleByValues(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixGetMultiple}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			WriteFunction(fileWriter,
-				GetFunctionHeaderAsync(GetEntityTypeCollection(entityType), functionName, GetParameterListEnumerable(properties)),
-				GetFunctionBodyReturnWhereEnumerable(entityType, properties));
-		}
-
-		public virtual void WriteFunctionGetOne(IFileWriter fileWriter, IEntityType entityType, IReadOnlyList<IProperty> properties,
-			string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixGetOne}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			WriteFunction(fileWriter, GetFunctionHeaderAsync(GetEntityType(entityType), functionName, GetParameterList(properties)),
-				GetFunctionBodyReturnSingle(entityType, properties));
-		}
-
-		public virtual void WriteFunctionRemoveMultiple(IFileWriter fileWriter, IEntityType entityType, IReadOnlyList<IProperty> properties,
-			string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixRemoveMultiple}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			WriteFunction(fileWriter, GetFunctionHeaderAsync("void", functionName, GetParameterList(properties)),
-				GetFunctionBodyRemoveWhere(entityType, properties));
-		}
-
-		public virtual void WriteFunctionRemoveMultipleByValues(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixRemoveMultiple}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			WriteFunction(fileWriter, GetFunctionHeaderAsync("void", functionName, GetParameterListEnumerable(properties)),
-				GetFunctionBodyRemoveWhereEnumerable(entityType, properties));
-		}
-
-		public virtual void WriteFunctionRemoveOne(IFileWriter fileWriter, IEntityType entityType, IReadOnlyList<IProperty> properties,
-			string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixRemoveOne}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			WriteFunction(fileWriter, GetFunctionHeaderAsync("void", functionName, GetParameterList(properties)),
-				GetFunctionBodyRemoveSingle(entityType, properties));
-		}
-
-		public virtual void WriteFunctionSignatureBasicAdd(IFileWriter fileWriter, IEntityType entityType,
-			bool addEntityTypeToFunctionName = false)
-		{
-			string functionName = FunctionNameBasicAdd;
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			fileWriter.WriteLine(GetFunctionSignature("void", functionName, $"{GetEntityType(entityType)} entity"));
-		}
-
-		public virtual void WriteFunctionSignatureBasicGetAll(IFileWriter fileWriter, IEntityType entityType,
-			bool addEntityTypeToFunctionName = false)
-		{
-			string functionName = FunctionNameBasicGetAll;
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			fileWriter.WriteLine(GetFunctionSignatureAsync(GetEntityTypeCollection(entityType), functionName, string.Empty));
-		}
-
-		public virtual void WriteFunctionSignatureBasicRemove(IFileWriter fileWriter, IEntityType entityType,
-			bool addEntityTypeToFunctionName = false)
-		{
-			string functionName = FunctionNameBasicRemove;
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			fileWriter.WriteLine(GetFunctionSignature("void", functionName, $"{GetEntityType(entityType)} entity"));
-		}
-
-		public virtual void WriteFunctionSignatureBasicRemoveMultiple(IFileWriter fileWriter, IEntityType entityType,
-			bool addEntityTypeToFunctionName = false)
-		{
-			string functionName = FunctionNameBasicRemoveMultiple;
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			fileWriter.WriteLine(GetFunctionSignature("void", functionName, $"IEnumerable<{GetEntityType(entityType)}> entities"));
-		}
-
-		public virtual void WriteFunctionSignatureGetMultiple(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixGetMultiple}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			fileWriter.WriteLine(GetFunctionSignatureAsync(GetEntityTypeCollection(entityType), functionName,
-				GetParameterListEnumerable(properties)));
-		}
-
-		public virtual void WriteFunctionSignatureGetMultipleByValues(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixGetMultiple}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			fileWriter.WriteLine(GetFunctionSignatureAsync(GetEntityTypeCollection(entityType), functionName,
-				GetParameterListEnumerable(properties)));
-		}
-
-		public virtual void WriteFunctionSignatureGetOne(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixGetOne}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			fileWriter.WriteLine(GetFunctionSignatureAsync(GetEntityType(entityType), functionName, GetParameterList(properties)));
-		}
-
-		public virtual void WriteFunctionSignatureRemoveMultiple(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixRemoveMultiple}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			fileWriter.WriteLine(GetFunctionSignatureAsync("void", functionName, GetParameterList(properties)));
-		}
-
-		public virtual void WriteFunctionSignatureRemoveMultipleByValues(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixRemoveMultiple}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null, !PluralizeNames);
-
-			fileWriter.WriteLine(GetFunctionSignatureAsync("void", functionName, GetParameterListEnumerable(properties)));
-		}
-
-		public virtual void WriteFunctionSignatureRemoveOne(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixRemoveOne}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			fileWriter.WriteLine(GetFunctionSignatureAsync("void", functionName, GetParameterList(properties)));
-		}
-
-		public virtual void WriteFunctionSignatureTryGetOne(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixTryGetOne}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			fileWriter.WriteLine(GetFunctionSignatureAsync(GetEntityType(entityType), functionName, GetParameterList(properties)));
-		}
-
-		public virtual void WriteFunctionSignatureTryRemoveOne(IFileWriter fileWriter, IEntityType entityType,
-			IReadOnlyList<IProperty> properties, string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixTryRemoveOne}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			fileWriter.WriteLine(GetFunctionSignatureAsync("bool", functionName, GetParameterList(properties)));
-		}
-
-		public virtual void WriteFunctionTryGetOne(IFileWriter fileWriter, IEntityType entityType, IReadOnlyList<IProperty> properties,
-			string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixTryGetOne}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			WriteFunction(fileWriter, GetFunctionHeaderAsync(GetEntityType(entityType), functionName, GetParameterList(properties)),
-				GetFunctionBodyReturnSingleOrDefault(entityType, properties));
-		}
-
-		public virtual void WriteFunctionTryRemoveOne(IFileWriter fileWriter, IEntityType entityType, IReadOnlyList<IProperty> properties,
-			string functionName = null, bool addEntityTypeToFunctionName = false)
-		{
-			functionName = functionName ?? $"{FunctionNamePrefixTryRemoveOne}{GetFunctionNameParameter(properties)}Async";
-			functionName = Smart.Format(functionName, addEntityTypeToFunctionName ? entityType : null);
-
-			WriteFunction(fileWriter, GetFunctionHeaderAsync("bool", functionName, GetParameterList(properties)),
-				GetFunctionBodyTryRemoveSingle(entityType, properties));
 		}
 	}
 }
