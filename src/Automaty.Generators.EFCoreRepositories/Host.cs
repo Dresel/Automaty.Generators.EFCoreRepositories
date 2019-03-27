@@ -24,12 +24,19 @@
 //------------------------------------------------------------------------------";
 
 			Namespace = GetType().Namespace;
+
+			AddIndexFunctions = true;
+			AddForeignKeyFunctions = true;
 		}
 
 		public IDictionary<string, IEnumerable<string>> AggregateRepositories { get; } =
 			new Dictionary<string, IEnumerable<string>>();
 
-		public ICollection<string> AdditionalNamespaces { get; set; } = new List<string>();
+		public bool AddForeignKeyFunctions { get; set; }
+
+		public bool AddIndexFunctions { get; set; }
+
+		public bool AddPropertyFunctions { get; set; }
 
 		public bool GenerateAsyncFunctions { get; set; }
 
@@ -81,34 +88,7 @@
 				using (WriteClassHeader(context, type.ClrType.Name))
 				{
 					WriteConstructor(context, type.ClrType.Name);
-					WriteBasicFunctions(context, type, false);
-
-					ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
-
-					IKey key = type.FindPrimaryKey();
-
-					WriteFunctions(context, type, key.Properties, false, false, true, GenerateAsyncFunctions);
-					addedFunctions.Add(key.Properties);
-
-					foreach (IIndex index in type.GetIndexes())
-					{
-						if (!addedFunctions.Contains(index.Properties))
-						{
-							WriteFunctions(context, type, index.Properties, true, true, index.IsUnique,
-								GenerateAsyncFunctions);
-							addedFunctions.Add(index.Properties);
-						}
-					}
-
-					foreach (IForeignKey foreignKey in type.GetForeignKeys())
-					{
-						if (!addedFunctions.Contains(foreignKey.Properties))
-						{
-							WriteFunctions(context, type, foreignKey.Properties, true, true, foreignKey.IsUnique,
-								GenerateAsyncFunctions);
-							addedFunctions.Add(foreignKey.Properties);
-						}
-					}
+					WriteFunctionsOrFunctionSignatures(context, type, false, false);
 				}
 			}
 		}
@@ -130,35 +110,9 @@
 				{
 					WriteConstructor(context, collectionName);
 
-					ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
-
 					foreach (IEntityType type in types)
 					{
-						WriteBasicFunctions(context, type, true);
-						IKey key = type.FindPrimaryKey();
-
-						WriteFunctions(context, type, key.Properties, true, false, true, GenerateAsyncFunctions);
-						addedFunctions.Add(key.Properties);
-
-						foreach (IIndex index in type.GetIndexes())
-						{
-							if (!addedFunctions.Contains(index.Properties))
-							{
-								WriteFunctions(context, type, index.Properties, true, true, index.IsUnique,
-									GenerateAsyncFunctions);
-								addedFunctions.Add(index.Properties);
-							}
-						}
-
-						foreach (IForeignKey foreignKey in type.GetForeignKeys())
-						{
-							if (!addedFunctions.Contains(foreignKey.Properties))
-							{
-								WriteFunctions(context, type, foreignKey.Properties, true, true, foreignKey.IsUnique,
-									GenerateAsyncFunctions);
-								addedFunctions.Add(foreignKey.Properties);
-							}
-						}
+						WriteFunctionsOrFunctionSignatures(context, type, true, false);
 					}
 				}
 			}
@@ -180,36 +134,9 @@
 
 				using (WriteInterfaceHeader(context, collectionName))
 				{
-					ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
-
 					foreach (IEntityType type in types)
 					{
-						WriteBasicFunctionSignatures(context, type, true);
-						IKey key = type.FindPrimaryKey();
-
-						WriteFunctionSignatures(context, type, key.Properties, true, false, true,
-							GenerateAsyncFunctions);
-						addedFunctions.Add(key.Properties);
-
-						foreach (IIndex index in type.GetIndexes())
-						{
-							if (!addedFunctions.Contains(index.Properties))
-							{
-								WriteFunctionSignatures(context, type, index.Properties, true, true, index.IsUnique,
-									GenerateAsyncFunctions);
-								addedFunctions.Add(index.Properties);
-							}
-						}
-
-						foreach (IForeignKey foreignKey in type.GetForeignKeys())
-						{
-							if (!addedFunctions.Contains(foreignKey.Properties))
-							{
-								WriteFunctionSignatures(context, type, foreignKey.Properties, true, true,
-									foreignKey.IsUnique, GenerateAsyncFunctions);
-								addedFunctions.Add(foreignKey.Properties);
-							}
-						}
+						WriteFunctionsOrFunctionSignatures(context, type, true, true);
 					}
 				}
 			}
@@ -229,33 +156,68 @@
 
 				using (WriteInterfaceHeader(context, type.ClrType.Name))
 				{
-					WriteBasicFunctionSignatures(context, type, false);
+					WriteFunctionsOrFunctionSignatures(context, type, false, true);
+				}
+			}
+		}
 
-					ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
+		public virtual void WriteFunctionsOrFunctionSignatures(IScriptContext context, IEntityType type,
+			bool addEntityName, bool writeFunctionSignatures)
+		{
+			Action<IScriptContext, IEntityType, IReadOnlyCollection<IProperty>, bool, bool, bool, bool> write;
 
-					IKey key = type.FindPrimaryKey();
+			if (!writeFunctionSignatures)
+			{
+				WriteBasicFunctions(context, type, addEntityName);
+				write = WriteFunctions;
+			}
+			else
+			{
+				WriteBasicFunctionSignatures(context, type, addEntityName);
+				write = WriteFunctionSignatures;
+			}
 
-					WriteFunctionSignatures(context, type, key.Properties, false, false, true, GenerateAsyncFunctions);
-					addedFunctions.Add(key.Properties);
+			ISet<IEnumerable<IProperty>> addedFunctions = new HashSet<IEnumerable<IProperty>>();
 
-					foreach (IIndex index in type.GetIndexes())
+			IKey key = type.FindPrimaryKey();
+
+			write(context, type, key.Properties, addEntityName, false, true,
+				GenerateAsyncFunctions);
+			addedFunctions.Add(key.Properties);
+
+			if (AddIndexFunctions)
+			{
+				foreach (IIndex index in type.GetIndexes())
+				{
+					if (!addedFunctions.Any(x => x.SequenceEqual(index.Properties.ToList())))
 					{
-						if (!addedFunctions.Contains(index.Properties))
-						{
-							WriteFunctionSignatures(context, type, index.Properties, true, true, index.IsUnique,
-								GenerateAsyncFunctions);
-							addedFunctions.Add(index.Properties);
-						}
+						write(context, type, index.Properties, addEntityName, true, index.IsUnique, GenerateAsyncFunctions);
+						addedFunctions.Add(index.Properties);
 					}
+				}
+			}
 
-					foreach (IForeignKey foreignKey in type.GetForeignKeys())
+			if (AddForeignKeyFunctions)
+			{
+				foreach (IForeignKey foreignKey in type.GetForeignKeys())
+				{
+					if (!addedFunctions.Any(x => x.SequenceEqual(foreignKey.Properties.ToList())))
 					{
-						if (!addedFunctions.Contains(foreignKey.Properties))
-						{
-							WriteFunctionSignatures(context, type, foreignKey.Properties, true, true,
-								foreignKey.IsUnique, GenerateAsyncFunctions);
-							addedFunctions.Add(foreignKey.Properties);
-						}
+						write(context, type, foreignKey.Properties, addEntityName, true, foreignKey.IsUnique,
+							GenerateAsyncFunctions);
+						addedFunctions.Add(foreignKey.Properties);
+					}
+				}
+			}
+
+			if (AddPropertyFunctions)
+			{
+				foreach (IProperty property in type.GetProperties())
+				{
+					if (!addedFunctions.Any(x => x.SequenceEqual(new[] { property })))
+					{
+						write(context, type, new[] { property }, addEntityName, true, false, GenerateAsyncFunctions);
+						addedFunctions.Add(new[] { property });
 					}
 				}
 			}
@@ -264,6 +226,16 @@
 		protected virtual string Entity(bool addEntityName, IEntityType type, bool pluralize = false)
 		{
 			return addEntityName ? (!pluralize ? type.ClrType.Name : type.ClrType.Name.Pluralize()) : string.Empty;
+		}
+
+		protected virtual string FileNameForCollection(string collectionName)
+		{
+			return $"{collectionName}Repository";
+		}
+
+		protected virtual string FileNameForEntity(IEntityType type)
+		{
+			return $"{type.ClrType.Name}Repository";
 		}
 
 		protected virtual Type GetTupleType(Type[] types)
@@ -282,10 +254,6 @@
 				default: throw new InvalidOperationException();
 			}
 		}
-
-		protected virtual string FileNameForCollection(string collectionName) => $"{collectionName}Repository";
-
-		protected virtual string FileNameForEntity(IEntityType type) => $"{type.ClrType.Name}Repository";
 
 		protected virtual Type ListType(IEntityType type, bool asTask = false)
 		{
@@ -378,14 +346,16 @@
 			}
 		}
 
-		protected virtual void
-			WriteAddAsyncFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+		protected virtual void WriteAddAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			bool addEntityName)
+		{
 			WriteFunctionSignature(context, typeof(Task), $"Add{Entity(addEntityName, type)}Async",
 				new Dictionary<string, Type>()
 				{
 					{ "entity", type.ClrType },
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteAddFunction(IScriptContext context, IEntityType type, bool addEntityName)
 		{
@@ -399,12 +369,13 @@
 			}
 		}
 
-		protected virtual void
-			WriteAddFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+		protected virtual void WriteAddFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName)
+		{
 			WriteFunctionSignature(context, null, $"Add{Entity(addEntityName, type)}", new Dictionary<string, Type>()
 			{
 				{ "entity", type.ClrType }
 			});
+		}
 
 		protected virtual void WriteBasicFunctions(IScriptContext context, IEntityType type, bool addEntityName)
 		{
@@ -427,9 +398,11 @@
 			WriteGetAllAsyncFunctionSignature(context, type, addEntityName);
 		}
 
-		protected virtual IDisposable WriteClassHeader(IScriptContext context, string name) =>
-			context.Output.Current.WriteScope(
+		protected virtual IDisposable WriteClassHeader(IScriptContext context, string name)
+		{
+			return context.Output.Current.WriteScope(
 				$"public partial class {name}Repository : BaseRepository, I{name}Repository");
+		}
 
 		protected virtual void WriteConstructor(IScriptContext context, string name)
 		{
@@ -554,13 +527,15 @@
 			}
 		}
 
-		protected virtual void
-			WriteGetAllAsyncFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+		protected virtual void WriteGetAllAsyncFunctionSignature(IScriptContext context, IEntityType type,
+			bool addEntityName)
+		{
 			WriteFunctionSignature(context, ListType(type, true), $"GetAll{Entity(addEntityName, type, true)}Async",
 				new Dictionary<string, Type>()
 				{
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteGetAllFunction(IScriptContext context, IEntityType type, bool addEntityName)
 		{
@@ -571,10 +546,12 @@
 			}
 		}
 
-		protected virtual void
-			WriteGetAllFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+		protected virtual void WriteGetAllFunctionSignature(IScriptContext context, IEntityType type,
+			bool addEntityName)
+		{
 			WriteFunctionSignature(context, ListType(type), $"GetAll{Entity(addEntityName, type, true)}",
 				new Dictionary<string, Type>());
+		}
 
 		protected virtual void WriteGetByKeyAsyncFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -592,13 +569,15 @@
 		}
 
 		protected virtual void WriteGetByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, typeof(Task<>).MakeGenericType(type.ClrType),
 				$"Get{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}Async",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
 				{
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteGetByKeyFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -613,10 +592,12 @@
 		}
 
 		protected virtual void WriteGetByKeyFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, type.ClrType,
 				$"Get{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+		}
 
 		protected virtual void WriteGetByKeysAsyncFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -641,7 +622,8 @@
 		}
 
 		protected virtual void WriteGetByKeysAsyncFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, ListType(type, true),
 				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}Async",
 				new Dictionary<string, Type>()
@@ -649,6 +631,7 @@
 					ToEnumerableKeyValuePair(properties, addCompleteKey),
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteGetByKeysFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -666,13 +649,15 @@
 		}
 
 		protected virtual void WriteGetByKeysFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, ListType(type),
 				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}",
 				new Dictionary<string, Type>()
 				{
 					ToEnumerableKeyValuePair(properties, addCompleteKey)
 				});
+		}
 
 		protected virtual void WriteGetMultipleByKeyAsyncFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -696,13 +681,15 @@
 		}
 
 		protected virtual void WriteGetMultipleByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, ListType(type, true),
 				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
 				{
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteGetMultipleByKeyFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -717,19 +704,27 @@
 		}
 
 		protected virtual void WriteGetMultipleByKeyFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, ListType(type),
 				$"Get{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+		}
 
-		protected virtual void WriteHeader(IScriptContext context) =>
+		protected virtual void WriteHeader(IScriptContext context)
+		{
 			context.Output.Current.WriteLine(Header).WriteLine();
+		}
 
-		protected virtual IDisposable WriteInterfaceHeader(IScriptContext context, string name) =>
-			context.Output.Current.WriteScope($"public interface I{name}Repository");
+		protected virtual IDisposable WriteInterfaceHeader(IScriptContext context, string name)
+		{
+			return context.Output.Current.WriteScope($"public interface I{name}Repository");
+		}
 
-		protected virtual IDisposable WriteNamespace(IScriptContext context) =>
-			context.Output.Current.WriteScope($"namespace {Namespace}");
+		protected virtual IDisposable WriteNamespace(IScriptContext context)
+		{
+			return context.Output.Current.WriteScope($"namespace {Namespace}");
+		}
 
 		protected virtual void WriteRemoveByKeyAsyncFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -753,13 +748,15 @@
 		}
 
 		protected virtual void WriteRemoveByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, typeof(Task),
 				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
 				{
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteRemoveByKeyFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -774,10 +771,12 @@
 		}
 
 		protected virtual void WriteRemoveByKeyFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, null,
 				$"Remove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+		}
 
 		protected virtual void WriteRemoveByKeysAsyncFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -802,7 +801,8 @@
 		}
 
 		protected virtual void WriteRemoveByKeysAsyncFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, typeof(Task),
 				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}Async",
 				new Dictionary<string, Type>()
@@ -810,6 +810,7 @@
 					ToEnumerableKeyValuePair(properties, addCompleteKey),
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteRemoveByKeysFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -827,13 +828,15 @@
 		}
 
 		protected virtual void WriteRemoveByKeysFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, null,
 				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey, true)}",
 				new Dictionary<string, Type>()
 				{
 					ToEnumerableKeyValuePair(properties, addCompleteKey)
 				});
+		}
 
 		protected virtual void WriteRemoveFunction(IScriptContext context, IEntityType type, bool addEntityName)
 		{
@@ -847,12 +850,14 @@
 			}
 		}
 
-		protected virtual void
-			WriteRemoveFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+		protected virtual void WriteRemoveFunctionSignature(IScriptContext context, IEntityType type,
+			bool addEntityName)
+		{
 			WriteFunctionSignature(context, null, $"Remove{Entity(addEntityName, type)}", new Dictionary<string, Type>()
 			{
 				{ "entity", type.ClrType }
 			});
+		}
 
 		protected virtual void WriteRemoveMultipleByKeyAsyncFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -876,13 +881,15 @@
 		}
 
 		protected virtual void WriteRemoveMultipleByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, typeof(Task),
 				$"Remove{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
 				{
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteRemoveMultipleByKeyFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -897,10 +904,12 @@
 		}
 
 		protected virtual void WriteRemoveMultipleByKeyFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, null,
 				$"Remove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+		}
 
 		protected virtual void WriteRemoveRangeFunction(IScriptContext context, IEntityType type, bool addEntityName)
 		{
@@ -914,13 +923,15 @@
 			}
 		}
 
-		protected virtual void
-			WriteRemoveRangeFunctionSignature(IScriptContext context, IEntityType type, bool addEntityName) =>
+		protected virtual void WriteRemoveRangeFunctionSignature(IScriptContext context, IEntityType type,
+			bool addEntityName)
+		{
 			WriteFunctionSignature(context, null, $"Remove{Entity(addEntityName, type, true)}",
 				new Dictionary<string, Type>()
 				{
 					{ "entities", typeof(IEnumerable<>).MakeGenericType(type.ClrType) }
 				});
+		}
 
 		protected virtual void WriteTryGetByKeyAsyncFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -938,13 +949,15 @@
 		}
 
 		protected virtual void WriteTryGetByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, typeof(Task<>).MakeGenericType(type.ClrType),
 				$"TryGet{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}Async",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
 				{
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteTryGetByKeyFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -959,10 +972,12 @@
 		}
 
 		protected virtual void WriteTryGetByKeyFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, type.ClrType,
 				$"TryGet{Entity(addEntityName, type, true)}By{Properties(properties, addCompleteKey)}",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+		}
 
 		protected virtual void WriteTryRemoveByKeyAsyncFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -995,13 +1010,15 @@
 		}
 
 		protected virtual void WriteTryRemoveByKeyAsyncFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, typeof(Task<bool>),
 				$"TryRemove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}Async",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey))
 				{
 					{ "cancellationToken", typeof(CancellationToken) }
 				});
+		}
 
 		protected virtual void WriteTryRemoveByKeyFunction(IScriptContext context, IEntityType type,
 			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
@@ -1021,10 +1038,12 @@
 		}
 
 		protected virtual void WriteTryRemoveByKeyFunctionSignature(IScriptContext context, IEntityType type,
-			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey) =>
+			IReadOnlyCollection<IProperty> properties, bool addEntityName, bool addCompleteKey)
+		{
 			WriteFunctionSignature(context, typeof(bool),
 				$"TryRemove{Entity(addEntityName, type)}By{Properties(properties, addCompleteKey)}",
 				new Dictionary<string, Type>(ToDictionary(properties, addCompleteKey)));
+		}
 
 		protected virtual void WriteUsings(IScriptContext context, IEnumerable<IEntityType> types)
 		{
@@ -1033,11 +1052,6 @@
 				.WriteLine("using System.Threading.Tasks;").WriteLine("using Microsoft.EntityFrameworkCore;");
 
 			foreach (string @namespace in types.Select(x => x.ClrType.Namespace).Distinct())
-			{
-				context.Output.Current.WriteLine($"using {@namespace};");
-			}
-
-			foreach (string @namespace in AdditionalNamespaces)
 			{
 				context.Output.Current.WriteLine($"using {@namespace};");
 			}

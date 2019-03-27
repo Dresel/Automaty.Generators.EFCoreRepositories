@@ -9,7 +9,7 @@
 	{
 		public static void EnsureSeedData(this MusicStoreContext context)
 		{
-			if (context.AllMigrationsApplied())
+			//if (context.AllMigrationsApplied())
 			{
 				if (!context.Genres.Any())
 				{
