@@ -1,6 +1,7 @@
 namespace Automaty.Generators.EFCoreRepositories.Test
 {
 	using System.Collections.Generic;
+	using System.IO;
 	using Automaty.Core;
 	using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -17,20 +18,21 @@ namespace Automaty.Generators.EFCoreRepositories.Test
 			string sampleProjectDirectoryPath = SampleTest.ProjectDirectoryPath.ToPlatformSpecificPath();
 			string projectFilePath = SampleTest.ProjectFilePath;
 
-			string sourceFilePath = "Repositories.cs";
+			string sourceFilePath = Path.Combine("Repositories", "Host.cs");
 
 			ICollection<string> generatedFilePaths = new[]
 			{
-				"Repositories.Album.generated.cs", "Repositories.Artist.generated.cs", "Repositories.CartItem.generated.cs",
-				"Repositories.Genre.generated.cs", "Repositories.Music.generated.cs", "Repositories.Order.generated.cs",
-				"Repositories.OrderDetail.generated.cs"
+				"AlbumRepository.generated.cs", "ArtistGenreRepository.generated.cs",
+				"ArtistRepository.generated.cs", "CartItemRepository.generated.cs", "GenreRepository.generated.cs",
+				"MusicRepository.generated.cs", "OrderDetailRepository.generated.cs", "OrderRepository.generated.cs"
 			};
 
 			Helper.AssertSampleProjectDirectoryPathExists(sampleProjectDirectoryPath);
 
 			foreach (string generatedFilePath in generatedFilePaths)
 			{
-				Helper.AssertGeneratedFileDoesNotExist(sampleProjectDirectoryPath, generatedFilePath);
+				Helper.AssertGeneratedFileDoesNotExist(sampleProjectDirectoryPath,
+					Path.Combine("Repositories", generatedFilePath));
 			}
 
 			Helper.DotNetRestore(sampleProjectDirectoryPath, projectFilePath);
@@ -38,7 +40,8 @@ namespace Automaty.Generators.EFCoreRepositories.Test
 
 			foreach (string generatedFilePath in generatedFilePaths)
 			{
-				Helper.AssertGeneratedFileExists(sampleProjectDirectoryPath, generatedFilePath);
+				Helper.AssertGeneratedFileExists(sampleProjectDirectoryPath,
+					Path.Combine("Repositories", generatedFilePath));
 			}
 		}
 	}

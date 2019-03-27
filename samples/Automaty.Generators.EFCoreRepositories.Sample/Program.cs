@@ -2,6 +2,7 @@
 {
 	using System.Collections.Generic;
 	using Automaty.Generators.EFCoreRepositories.Sample.Entities;
+	using Automaty.Generators.EFCoreRepositories.Sample.Repositories;
 	using Automaty.Generators.EFCoreRepositories.Sample.Seeding;
 	using Microsoft.EntityFrameworkCore;
 
@@ -22,8 +23,8 @@
 				GenreRepository genreRepository = new GenreRepository(context);
 
 				ICollection<Album> filterByArtistIdAndGenreId =
-						albumRepository.FilterByArtistIdAndGenreId(artistRepository.GetByName("Iron Maiden").ArtistId,
-							genreRepository.GetByName("Metal").GenreId);
+					albumRepository.GetByArtistIdAndGenreId(artistRepository.GetByName("Iron Maiden").ArtistId,
+						genreRepository.GetByName("Metal").GenreId);
 			}
 		}
 	}
